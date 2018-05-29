@@ -16,16 +16,20 @@ struct tm_cert {
         struct {
             /* new_root has an additional placeholder */
             hash_t orig_root, new_root;
-            char zero[2 * 32];
         } eq; /* equivalence */
         struct {
             /* proof that there is a node with given idx,val that is a
              * child of root; if val=0, proof that there is no such
              * node */
+            hash_t root;
             int idx;
             hash_t val;
-            hash_t root;
-            } rv; /* record verify */
+        } rv; /* record verify */
+        struct {
+            int idx;
+            hash_t orig_val, new_val;
+            hash_t orig_root, new_root;
+        } ru; /* record update */
     };
 };
 
@@ -54,3 +58,27 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
                              const struct iomt_node *encloser,
                              int a, hash_t *hmac_out);
+
+/* nu must be of the form [x,y,x,y] to indicate that x is a child of y */
+/* also, if b > 0 and nonexist != NULL, this function will generate a
+ * certificate indicating that no node with index b exists with root
+ * y*/
+struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
+                                     const struct tm_cert *nu, hash_t hmac,
+                                     const struct iomt_node *node,
+                                     hash_t *hmac_out,
+                                     int b,
+                                     struct tm_cert *nonexist,
+                                     hash_t *hmac_nonexist);
+
+struct tm_cert tm_cert_record_update(struct trusted_module *tm,
+                                     const struct tm_cert *nu, hash_t nu_hmac,
+                                     const struct iomt_node *node,
+                                     hash_t new_val,
+                                     hash_t *hmac_out);
+
+/* transformation procedures (return true on success) */
+
+/* change internal IOMT root to equivalent root */
+bool tm_set_equiv_root(struct trusted_module *tm,
+                       const struct tm_cert *cert_eq, hash_t hmac);

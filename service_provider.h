@@ -8,7 +8,7 @@
 
 struct iomt_node {
     int idx, next_idx; /* idx cannot be zero */
-    hash_t value; /* all zero indicates placeholder */
+    hash_t val; /* all zero indicates placeholder */
 };
 
 struct service_provider;

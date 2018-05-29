@@ -235,7 +235,7 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
     struct iomt_node ins;
     ins.idx = a;
     ins.next_idx = encloser->next_idx;
-    memset(ins.value.hash, 0, sizeof(ins.value.hash));
+    memset(ins.val.hash, 0, sizeof(ins.val.hash));
 
     hash_t viprime = hash_node(&ins);
 
@@ -260,10 +260,16 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
 }
 
 /* nu must be of the form [x,y,x,y] to indicate that x is a child of y */
+/* also, if b > 0 and nonexist != NULL, this function will generate a
+ * certificate indicating that no node with index b exists with root
+ * y*/
 struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
                                      const struct iomt_node *node,
-                                     hash_t *hmac_out)
+                                     hash_t *hmac_out,
+                                     int b,
+                                     struct tm_cert *nonexist,
+                                     hash_t *hmac_nonexist)
 {
     if(!nu)
         return cert_null;
@@ -274,15 +280,85 @@ struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
     if(!hash_equals(nu->nu.orig_node, node_h))
         return cert_null;
 
+    /* issue a certificate verifying that no node with index b exists as a child of y */
+    if(b > 0 && nonexist && hmac_nonexist)
+    {
+        if(encloses(node->idx, node->next_idx, b))
+        {
+            memset(nonexist, 0, sizeof(*nonexist));
+            nonexist->type = RV;
+            nonexist->rv.idx = b;
 
+            /* not needed */
+            //memset(nonexist->rv.val, 0, sizeof(nonexist->rv.val));
+
+            nonexist->rv.root = nu->nu.orig_root;
+
+            *hmac_nonexist = cert_sign(tm, nonexist);
+        }
+        else
+            *nonexist = cert_null;
+    }
+
+    /* verify that this node is a child of y */
+    struct tm_cert cert;
+
+    memset(&cert, 0, sizeof(cert));
+
+    cert.type = RV;
+    cert.rv.root = nu->nu.orig_root;
+    cert.rv.idx = node->idx;
+    cert.rv.val = node->val;
+
+    *hmac_out = cert_sign(tm, &cert);
+    return cert;
 }
 
+struct tm_cert tm_cert_record_update(struct trusted_module *tm,
+                                     const struct tm_cert *nu, hash_t nu_hmac,
+                                     const struct iomt_node *node,
+                                     hash_t new_val,
+                                     hash_t *hmac_out)
+{
+    if(!nu)
+        return cert_null;
+    if(nu->type != NU)
+        return cert_null;
+    if(!cert_verify(tm, nu, nu_hmac))
+        return cert_null;
+
+    hash_t orig_h = hash_node(node);
+
+    struct iomt_node new_node = *node;
+    new_node.val = new_val;
+
+    hash_t new_h = hash_node(&new_node);
+
+    if(!hash_equals(nu->nu.orig_node, orig_h) || !hash_equals(nu->nu.new_node, new_h))
+        return cert_null;
+
+    struct tm_cert cert;
+    memset(&cert, 0, sizeof(cert));
+
+    cert.type = RU;
+    cert.ru.idx = node->idx;
+    cert.ru.orig_val = node->val;
+    cert.ru.new_val = new_val;
+    cert.ru.orig_root = nu->nu.orig_root;
+    cert.ru.new_root = nu->nu.new_root;
+
+    *hmac_out = cert_sign(tm, &cert);
+    return cert;
+}
+
+
+
+/* self-test */
 void check(int condition)
 {
     printf(condition ? "PASS\n" : "FAIL\n");
 }
 
-/* self-test */
 void tm_test(void)
 {
     /* test merkle tree with zeros */
