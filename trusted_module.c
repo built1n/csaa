@@ -351,7 +351,30 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
     return cert;
 }
 
+bool tm_set_equiv_root(struct trusted_module *tm,
+                       const struct tm_cert *cert_eq, hash_t hmac)
+{
+    if(!cert_eq)
+        return false;
+    if(cert_eq->type != EQ)
+        return false;
+    if(!cert_verify(tm, cert_eq, hmac))
+        return false;
 
+    if(hash_equals(tm->root, cert_eq->eq.orig_root))
+    {
+        tm->root = cert_eq->eq.new_root;
+        return true;
+    }
+
+    if(hash_equals(tm->root, cert_eq->eq.new_root))
+    {
+        tm->root = cert_eq->eq.orig_root;
+        return true;
+    }
+
+    return false;
+}
 
 /* self-test */
 void check(int condition)
