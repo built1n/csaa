@@ -1,13 +1,15 @@
 /* interface to the trusted module */
 
+#include <stdbool.h>
 #include <stddef.h>
+
 #include "crypto.h"
 #include "service_provider.h"
 
 struct trusted_module;
 
 struct tm_cert {
-    enum { NONE = 0, NU, EQ, RV, RU } type;
+    enum { NONE = 0, NU, EQ, RV, RU, FR, VR } type;
     union {
         struct {
             hash_t orig_node, new_node;
@@ -30,11 +32,22 @@ struct tm_cert {
             hash_t orig_val, new_val;
             hash_t orig_root, new_root;
         } ru; /* record update */
+        struct {
+            int idx;
+            int counter;
+            int version;
+            hash_t acl; /* root of ACL IOMT */
+        } fr; /* file record */
+        struct {
+            int idx;
+            int version;
+            hash_t hash; /* commitment to contents, key, and index */
+        } vr; /* version record (of a file) */
     };
 };
 
-/* dynamically allocated */
-struct trusted_module *tm_new(const char *key, size_t keylen);
+/* creates 1 user with given shared secret */
+struct trusted_module *tm_new(const void *key, size_t keylen);
 void tm_free(struct trusted_module *tm);
 void tm_test(void);
 

@@ -7,4 +7,9 @@ typedef struct hash_t {
     unsigned char hash[32];
 } hash_t;
 
+struct iomt_node {
+    int idx, next_idx; /* idx cannot be zero */
+    hash_t val; /* all zero indicates placeholder */
+};
+
 #endif

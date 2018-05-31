@@ -17,12 +17,17 @@
 #include "service_provider.h"
 #include "trusted_module.h"
 
+struct user_key {
+    const void *key;
+    size_t len;
+};
+
 struct trusted_module {
     hash_t root; /* root of IOMT */
 
     /* shared secret with user */
-    const char *key;
-    size_t keylen;
+    struct user_key *user_keys;
+    size_t n_users;
 
     /* secret for signing self-certificates */
     unsigned char secret[32];
@@ -64,7 +69,7 @@ bool hash_equals(hash_t a, hash_t b)
     return !memcmp(a.hash, b.hash, 32);
 }
 
-struct trusted_module *tm_new(const char *key, size_t keylen)
+struct trusted_module *tm_new(const void *key, size_t keylen)
 {
     struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
 
@@ -74,9 +79,12 @@ struct trusted_module *tm_new(const char *key, size_t keylen)
         return NULL;
     }
 
-    tm->key = key;
-    tm->keylen = keylen;
+    tm->user_keys = calloc(1, sizeof(*tm->user_keys));
+    tm->n_users = 1;
+    tm->user_keys[0].key = key;
+    tm->user_keys[0].len = keylen;
 
+    /* debugging */
     memset(tm->secret, 0, sizeof(tm->secret));
     memset(tm->root.hash, 0, sizeof(tm->root.hash));
 
@@ -289,7 +297,7 @@ struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
             nonexist->type = RV;
             nonexist->rv.idx = b;
 
-            /* not needed */
+            /* not needed, already zeroed */
             //memset(nonexist->rv.val, 0, sizeof(nonexist->rv.val));
 
             nonexist->rv.root = nu->nu.orig_root;
@@ -351,6 +359,8 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
     return cert;
 }
 
+/* toggle the IOMT root to an equivalent root (which differs only in
+ * having an extra zero placeholder) */
 bool tm_set_equiv_root(struct trusted_module *tm,
                        const struct tm_cert *cert_eq, hash_t hmac)
 {
@@ -374,6 +384,104 @@ bool tm_set_equiv_root(struct trusted_module *tm,
     }
 
     return false;
+}
+
+/* user id is 1-indexed */
+static hash_t req_sign(struct trusted_module *tm, const struct user_request *req, int id)
+{
+    return hmac_sha256(req, sizeof(*req), tm->user_keys[id - 1].key, tm->user_keys[id - 1].len);
+}
+
+/* verify HMAC of user request */
+static bool req_verify(struct trusted_module *tm, const struct user_request *req, int id, hash_t hmac)
+{
+    if(id < 1 || id >= tm->n_users + 1)
+        return false;
+    hash_t calculated = req_sign(tm, req);
+    return hash_equals(calculated, hmac);
+}
+
+/* execute a user request, if possible */
+/* TODO: authenticated acknowledgement */
+struct tm_cert tm_request(struct trusted_module *tm,
+                          const struct user_request *req, hash_t req_hmac,
+                          hmac_t *hmac_out)
+{
+    if(!req)
+        return cert_null;
+    if(!req_verify(tm, req, req->id, req_hmac))
+        return cert_null;
+
+    /* invalid request type */
+    if(req->type != ACL_UPDATE && req->type != FILE_UPDATE)
+        return cert_null;
+
+    /* file creation */
+    if(req->type == ACL_UPDATE && req->counter == 0)
+    {
+        /* We must verify that no file exists with the requested
+         * index by checking that we have a valid RU certificate
+         * showing that updating the record with index `f' from 0
+         * to 1 changes the IOMT root from the stored root (in the
+         * TM) to a different root */
+
+        /* we treat the hash like a 256-bit big-endian counter */
+        hash_t one;
+        memset(&one, 0, sizeof(one));
+        one.hash[31] = 1;
+
+        /* first check the validity of the certificate */
+        if(!cert_verify(tm, req->create.ru_cert, req->create.ru_hmac))
+            return cert_null;
+
+        /* verify that:
+           - the certificate has the same file index as the request
+           - the original value for the record is zero (a placeholder)
+           - the original root matches the current IOMT root stored in the module
+           - the new value is the value 1
+        */
+        if(req->create.ru_cert.ru.idx != req->idx ||
+           !is_zero(req->create.ru_cert.ru.orig_val)   ||
+           !hash_equals(req->create.ru_cert.ru.orig_root, tm->root) ||
+           !hash_equals(req->create.ru_cert.ru.new_val, one))
+            return cert_null;
+
+        /* update the IOMT root */
+        tm->root = req->create.ru_cert.ru.new_root;
+
+        /* issue an FR certificate */
+        struct tm_cert cert;
+        cert.type = FR;
+        cert.fr.idx = req->idx;
+        cert.fr.counter = req->counter + 1;
+        cert.fr.version = 0;
+        cert.fr.acl = req->val;
+
+        *hmac_out = cert_sign(tm, &cert);
+        return cert;
+    }
+
+    /* otherwise the request is to either modify the ACL, delete the
+     * file, or create a new version */
+    if(!cert_verify(tm, req->modify.fr_cert, req->modify.fr_hmac))
+        return cert_null;
+    if(!cert_verify(tm, req->modify.rv_cert, req->modify.rv_hmac))
+        return cert_null;
+
+    /* check access level */
+    if(!hash_equals(req->modify.fr_cert.acl, req->modify.rv_cert.root))
+        return cert_null;
+    if(req->modify.rv_cert.idx != req->id)
+        return cert_null;
+
+    /* we treat the bottom 8 bytes of the counter as an integer counter */
+    int access = hash_to_u64(req->modify.rv_cert.val);
+
+    /* no write access */
+    if(access < 2)
+        return cert_null;
+
+
 }
 
 /* self-test */
