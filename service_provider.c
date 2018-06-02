@@ -53,7 +53,7 @@ struct service_provider *sp_new(const void *key, size_t keylen)
     return sp;
 }
 
-void sp_request(struct service_provider *sp, const struct user_request *req, hmac_t hmac)
+void sp_request(struct service_provider *sp, const struct user_request *req, hash_t hmac)
 {
 
 }

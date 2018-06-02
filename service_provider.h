@@ -5,6 +5,7 @@
 #define CSAA_SERVICE_PROVIDER_H
 
 #include "crypto.h"
+#include "trusted_module.h"
 
 struct service_provider;
 
@@ -34,6 +35,8 @@ struct user_request {
             struct tm_cert rv_cert;
             hash_t rv_hmac;
 
+            /* RU certificate indicating updated counter value in
+             * IOMT */
             struct tm_cert ru_cert;
             hash_t ru_hmac;
         } modify;
@@ -41,6 +44,6 @@ struct user_request {
 };
 
 struct service_provider *sp_new(const void *key, size_t keylen);
-void sp_request(struct service_provider *sp, const struct user_request *req, hmac_t hmac);
+void sp_request(struct service_provider *sp, const struct user_request *req, hash_t hmac);
 
 #endif

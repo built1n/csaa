@@ -1,10 +1,11 @@
 /* interface to the trusted module */
+#ifndef CSAA_TRUSTED_MODULE_H
+#define CSAA_TRUSTED_MODULE_H
 
 #include <stdbool.h>
 #include <stddef.h>
 
 #include "crypto.h"
-#include "service_provider.h"
 
 struct trusted_module;
 
@@ -95,3 +96,5 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
 /* change internal IOMT root to equivalent root */
 bool tm_set_equiv_root(struct trusted_module *tm,
                        const struct tm_cert *cert_eq, hash_t hmac);
+
+#endif

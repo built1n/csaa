@@ -3,6 +3,7 @@
  * guarantees can be made as to the tamper-resistance of the module,
  * but instead this serves as a proof-of-concept. */
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -397,8 +398,17 @@ static bool req_verify(struct trusted_module *tm, const struct user_request *req
 {
     if(id < 1 || id >= tm->n_users + 1)
         return false;
-    hash_t calculated = req_sign(tm, req);
+    hash_t calculated = req_sign(tm, req, id);
     return hash_equals(calculated, hmac);
+}
+
+/* convert the first 8 bytes (little endian) to a 64-bit int */
+static uint64_t hash_to_u64(hash_t h)
+{
+    uint64_t ret = 0;
+    for(int i = 0; i < 8; ++i)
+        ret |= h.hash[i] << (i * 8);
+    return ret;
 }
 
 /* execute a user request, if possible */
@@ -453,7 +463,8 @@ static bool req_verify(struct trusted_module *tm, const struct user_request *req
 /* TODO: authenticated acknowledgement */
 struct tm_cert tm_request(struct trusted_module *tm,
                           const struct user_request *req, hash_t req_hmac,
-                          hmac_t *hmac_out)
+                          hash_t *hmac_out,
+                          struct tm_cert *vr_out, hash_t *vr_hmac)
 {
     if(!req)
         return cert_null;
@@ -473,13 +484,13 @@ struct tm_cert tm_request(struct trusted_module *tm,
          * to 1 changes the IOMT root from the stored root (in the
          * TM) to a different root */
 
-        /* we treat the hash like a 256-bit big-endian counter */
+        /* we treat the hash like a 256-bit little-endian counter */
         hash_t one;
         memset(&one, 0, sizeof(one));
-        one.hash[31] = 1;
+        one.hash[0] = 1;
 
         /* first check the validity of the certificate */
-        if(!cert_verify(tm, req->create.ru_cert, req->create.ru_hmac))
+        if(!cert_verify(tm, &req->create.ru_cert, req->create.ru_hmac))
             return cert_null;
 
         /* verify that:
@@ -514,19 +525,20 @@ struct tm_cert tm_request(struct trusted_module *tm,
      * (to verify ACL and access privilege). */
     if(req->counter <= 0)
         return cert_null;
-    if(!cert_verify(tm, req->modify.fr_cert, req->modify.fr_hmac))
+    if(!cert_verify(tm, &req->modify.fr_cert, req->modify.fr_hmac))
         return cert_null;
-    if(!cert_verify(tm, req->modify.rv_cert, req->modify.rv_hmac))
+    if(!cert_verify(tm, &req->modify.rv_cert, req->modify.rv_hmac))
         return cert_null;
     
     /* check access level */
-    if(!hash_equals(req->modify.fr_cert.acl, req->modify.rv_cert.root))
+    if(!hash_equals(req->modify.fr_cert.fr.acl, req->modify.rv_cert.rv.root))
         return cert_null;
-    if(req->modify.rv_cert.idx != req->id)
+    if(req->modify.rv_cert.rv.idx != req->id)
         return cert_null;
 
-    /* we treat the bottom 8 bytes of the counter as an integer counter */
-    int access = hash_to_u64(req->modify.rv_cert.val);
+    /* we treat the first 8 bytes of the counter as a little-endian
+     * integer counter */
+    int access = hash_to_u64(req->modify.rv_cert.rv.val);
 
     /* no write access to file or ACL */
     if(access < 2)
@@ -540,12 +552,14 @@ struct tm_cert tm_request(struct trusted_module *tm,
          * version number. */
         struct tm_cert fr, vr;
         
+        return fr;
     }
     else if(req->type == ACL_UPDATE)
     {
         /* We just need a new FR certificate with the new ACL. */
         struct tm_cert cert;
-        
+
+        return cert;
     }
 
     /* should not get here */
