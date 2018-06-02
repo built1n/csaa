@@ -17,7 +17,7 @@ struct user_request {
                  * update, val is a commitment to the contents, key,
                  * and index of the file */
     union {
-        /* if counter = 0 and type = ACL, create a new file with given ACL */
+        /* if counter = 0 and type = ACL_UPDATE, create a new file with given ACL */
         struct {
             struct tm_cert ru_cert;
             hash_t ru_hmac;

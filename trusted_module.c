@@ -402,6 +402,54 @@ static bool req_verify(struct trusted_module *tm, const struct user_request *req
 }
 
 /* execute a user request, if possible */
+/* 
+ * This function handles all transformations on the IOMT except
+ * inserting a placeholder (handled above). The function takes its
+ * parameter in the form of a user_request struct, which must be
+ * authenticated or else the function will fail. Based on the request
+ * contents, one of three actions are performed:
+ *
+ * 1) req->type == ACL_UPDATE and req->counter == 0:
+ *
+ * Create a new file entry. A properly authenticated RU certificate
+ * must be passed in the `create' struct of the request. The RU
+ * certificate must be of the form [ f, 0, current root, 1, new root
+ * ]. Additionally, the `val' field of the request struct should be
+ * set to the root of the ACL IOMT (a).
+ *
+ * Given these parameters, this function will then update the internal
+ * IOMT root to the new root and will issue an FR certificate of the
+ * form [ idx = f, c_f = 1, acl = a, ver = 0 ].
+ *
+ * 2) req->type == ACL_UPDATE (and req->counter > 0 and access = 3):
+ *
+ * Three properly authenticated certificates are needed for an update
+ * to the ACL: one FR certificate to indicate the ACL root, one RU
+ * certificate of the form [ user_id, access, acl_root ] to indicate
+ * user access level (which must be 3 in order to change the ACL), and
+ * one RU certificate of the form [ f, c_f, current IOMT root, c_f +
+ * 1, new IOMT root ] to indicate that the counter c_f is consistent
+ * with the internally stored root and the updated IOMT root.
+ *
+ * Given these three certificates, this function will return an FR
+ * certificate (signed in *hmac_out) with the updated ACL root, and
+ * will update the internal IOMT root to increment the file counter,
+ * c_f.
+ *
+ * 3) req->type == FILE_UPDATE (and req->counter > 0 and access >= 2):
+ *
+ * Three properly authenticated certificates are needed for the
+ * creation of a new file version (which are also the same as the ones
+ * needed for an ACL update, see above). The user access level must be
+ * >= 2, otherwise this function will fail.
+ *
+ * This function returns two certificates: one FR certificate
+ * indicating the updated file counter and version number (and an
+ * unchanged ACL root), and a new VR certificate, returned in *vr_out
+ * and signed in *vr_hmac. Additionally, the internal IOMT root will
+ * be updated to reflect the incremented file counter.
+ */
+
 /* TODO: authenticated acknowledgement */
 struct tm_cert tm_request(struct trusted_module *tm,
                           const struct user_request *req, hash_t req_hmac,
@@ -461,13 +509,16 @@ struct tm_cert tm_request(struct trusted_module *tm,
         return cert;
     }
 
-    /* otherwise the request is to either modify the ACL, delete the
-     * file, or create a new version */
+    /* Otherwise the request is to either modify the ACL or create a
+     * new file version. In either case, check the two certificates
+     * (to verify ACL and access privilege). */
+    if(req->counter <= 0)
+        return cert_null;
     if(!cert_verify(tm, req->modify.fr_cert, req->modify.fr_hmac))
         return cert_null;
     if(!cert_verify(tm, req->modify.rv_cert, req->modify.rv_hmac))
         return cert_null;
-
+    
     /* check access level */
     if(!hash_equals(req->modify.fr_cert.acl, req->modify.rv_cert.root))
         return cert_null;
@@ -477,11 +528,28 @@ struct tm_cert tm_request(struct trusted_module *tm,
     /* we treat the bottom 8 bytes of the counter as an integer counter */
     int access = hash_to_u64(req->modify.rv_cert.val);
 
-    /* no write access */
+    /* no write access to file or ACL */
     if(access < 2)
         return cert_null;
 
+    /* file update */
+    if(req->type == FILE_UPDATE)
+    {
+        /* We need to issue a VR certificate indicating the new
+         * version's contents, and an FR certificate with the new
+         * version number. */
+        struct tm_cert fr, vr;
+        
+    }
+    else if(req->type == ACL_UPDATE)
+    {
+        /* We just need a new FR certificate with the new ACL. */
+        struct tm_cert cert;
+        
+    }
 
+    /* should not get here */
+    assert(false);
 }
 
 /* self-test */
