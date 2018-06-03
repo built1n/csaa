@@ -616,36 +616,67 @@ void check(int condition)
 
 void tm_test(void)
 {
-    /* test merkle tree with zeros */
-    hash_t zero1, zero2;
-    memset(zero1.hash, 0, sizeof(zero1.hash));
-    memset(zero2.hash, 0, sizeof(zero2.hash));
-    int orders[] = { 0 };
+    {
+        /* test merkle tree with zeros */
+        hash_t zero1, zero2;
+        memset(zero1.hash, 0, sizeof(zero1.hash));
+        memset(zero2.hash, 0, sizeof(zero2.hash));
+        int orders[] = { 0 };
 
-    /* this should return zero */
-    hash_t res1 = merkle_compute(zero1, &zero2, orders, 1);
-    printf("is_zero(res1) = %d\n", is_zero(res1));
-    check(is_zero(res1));
+        /* this should return zero */
+        hash_t res1 = merkle_compute(zero1, &zero2, orders, 1);
+        printf("Merkle parent with zeros: ");
+        check(is_zero(res1));
 
-    hash_t a = sha256("a", 1);
-    hash_t b = sha256("b", 1);
-    hash_t c = sha256("c", 1);
-    hash_t d = sha256("d", 1);
-    hash_t cd = merkle_parent(c, d, 0);
-    dump_hash(cd);
-    char buf[64];
-    memcpy(buf, c.hash, 32);
-    memcpy(buf + 32, d.hash, 32);
-    dump_hash(sha256(buf, 64));
-    check(hash_equals(sha256(buf, 64), cd));
+        hash_t a = sha256("a", 1);
+        hash_t b = sha256("b", 1);
+        hash_t c = sha256("c", 1);
+        hash_t d = sha256("d", 1);
+        hash_t cd = merkle_parent(c, d, 0);
+        //dump_hash(cd);
+        char buf[64];
+        memcpy(buf, c.hash, 32);
+        memcpy(buf + 32, d.hash, 32);
+        //dump_hash(sha256(buf, 64));
+        printf("Merkle parent: ");
+        check(hash_equals(sha256(buf, 64), cd));
 
-    hash_t a_comp[] = { b, cd };
-    int a_orders[] = { 1, 1 };
-    hash_t root1 = merkle_compute(a, a_comp, a_orders, 2);
+        hash_t a_comp[] = { b, cd };
+        int a_orders[] = { 1, 1 };
+        hash_t root1 = merkle_compute(a, a_comp, a_orders, 2);
 
-    hash_t ab = merkle_parent(a, b, 0);
-    hash_t root2 = merkle_parent(ab, cd, 0);
-    dump_hash(root1);
-    dump_hash(root2);
-    check(hash_equals(root1, root2));
+        hash_t ab = merkle_parent(a, b, 0);
+        hash_t root2 = merkle_parent(ab, cd, 0);
+        //dump_hash(root1);
+        //dump_hash(root2);
+        printf("Merkle compute: ");
+        check(hash_equals(root1, root2));
+    }
+    
+    {
+        /* check NU certificate generation */
+        struct trusted_module *tm = tm_new("a", 1);
+
+        hash_t node = sha256("a", 1);
+        hash_t node_new = sha256("b", 1);
+        hash_t comp[] = { sha256("b", 1) };
+        int orders[] = { 1 }; /* complementary node is right child */
+    
+        hash_t hmac;
+        struct tm_cert nu = tm_cert_node_update(tm, node, node_new, comp, orders, 1, &hmac);
+        printf("NU generation: ");
+        check(nu.type == NU &&
+              hash_equals(nu.nu.orig_node, node) &&
+              hash_equals(nu.nu.orig_root, merkle_compute(node, comp, orders, 1)) &&
+              hash_equals(nu.nu.new_node, node_new) &&
+              hash_equals(nu.nu.new_root, merkle_compute(node_new, comp, orders, 1)));
+        printf("Certificate verification 1: ");
+        check(cert_verify(tm, &nu, hmac));
+        hash_t bogus = { { 0 } };
+        printf("Certificate verification 2: ");
+        check(!cert_verify(tm, &nu, bogus));
+        
+    
+        //tm_free(tm);
+    }
 }
