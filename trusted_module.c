@@ -434,7 +434,7 @@ static uint64_t hash_to_u64(hash_t h)
  * 2) req->type == ACL_UPDATE (and req->counter > 0 and access = 3):
  *
  * Three properly authenticated certificates are needed for an update
- * to the ACL: one FR certificate to indicate the ACL root, one RU
+ * to the ACL: one FR certificate to indicate the ACL root, one RV
  * certificate of the form [ user_id, access, acl_root ] to indicate
  * user access level (which must be 3 in order to change the ACL), and
  * one RU certificate of the form [ f, c_f, current IOMT root, c_f +
@@ -468,7 +468,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
 {
     if(!req)
         return cert_null;
-    if(!req_verify(tm, req, req->id, req_hmac))
+    if(!req_verify(tm, req, req->user_id, req_hmac))
         return cert_null;
 
     /* invalid request type */
@@ -521,7 +521,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
     }
 
     /* Otherwise the request is to either modify the ACL or create a
-     * new file version. In either case, check the two certificates
+     * new file version. In either case, check the three certificates
      * (to verify ACL and access privilege). */
     if(req->counter <= 0)
         return cert_null;
@@ -529,11 +529,32 @@ struct tm_cert tm_request(struct trusted_module *tm,
         return cert_null;
     if(!cert_verify(tm, &req->modify.rv_cert, req->modify.rv_hmac))
         return cert_null;
+    if(!cert_verify(tm, &req->modify.ru_cert, req->modify.ru_hmac))
+        return cert_null;
     
-    /* check access level */
+    /* check that FR and RU certificate indices match request index */
+    if(req->modify.fr_cert.fr.idx != req->idx ||
+       req->modify.ru_cert.ru.idx != req->idx)
+        return cert_null;
+
+    /* Check that the file counter is consistent with the stored root
+     * and the counter in the request. Also check that the FR
+     * certificate's counter matches that of the request. */
+    if(!hash_equals(req->modify.ru_cert.ru.orig_root, tm->root) ||
+       hash_to_u64(req->modify.ru_cert.ru.orig_val) != req->counter ||
+       req->modify.fr_cert.fr.counter != req->counter)
+        return cert_null;
+
+    /* check that the RU certificate corresponds to an increment of
+     * the counter value. */
+    if(hash_to_u64(req->modify.ru_cert.ru.orig_val) + 1 != hash_to_u64(req->modify.ru_cert.ru.new_val))
+        return cert_null;
+    
+    /* check access level using RV cert, which verifies a record in
+     * the ACL tree. */
     if(!hash_equals(req->modify.fr_cert.fr.acl, req->modify.rv_cert.rv.root))
         return cert_null;
-    if(req->modify.rv_cert.rv.idx != req->id)
+    if(req->modify.rv_cert.rv.idx != req->user_id)
         return cert_null;
 
     /* we treat the first 8 bytes of the counter as a little-endian
@@ -543,22 +564,43 @@ struct tm_cert tm_request(struct trusted_module *tm,
     /* no write access to file or ACL */
     if(access < 2)
         return cert_null;
-
+    
     /* file update */
     if(req->type == FILE_UPDATE)
     {
         /* We need to issue a VR certificate indicating the new
          * version's contents, and an FR certificate with the new
          * version number. */
-        struct tm_cert fr, vr;
+        struct tm_cert fr_cert, vr_cert;
+        fr_cert.type = FR;
+        fr_cert.fr.idx = req->idx;
+        fr_cert.fr.counter = req->counter + 1;
+        fr_cert.fr.version = req->modify.fr_cert.fr.version + 1;
+        fr_cert.fr.acl     = req->modify.fr_cert.fr.acl;
+
+        *hmac_out = cert_sign(tm, &fr_cert);
+
+        vr_cert.type = VR;
+        vr_cert.vr.idx = req->idx;
+        vr_cert.vr.version = req->modify.fr_cert.fr.version + 1;
+        vr_cert.vr.hash = req->val;
         
-        return fr;
+        *vr_hmac = cert_sign(tm, &vr_cert);
+        *vr_out = vr_cert;
+            
+        return fr_cert;
     }
     else if(req->type == ACL_UPDATE)
     {
         /* We just need a new FR certificate with the new ACL. */
         struct tm_cert cert;
-
+        cert.type = FR;
+        cert.fr.idx = req->idx;
+        cert.fr.counter = req->counter + 1;
+        cert.fr.version = req->modify.fr_cert.fr.version;
+        cert.fr.acl = req->val;
+        
+        *hmac_out = cert_sign(tm, &cert);
         return cert;
     }
 

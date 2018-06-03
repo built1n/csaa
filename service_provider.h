@@ -11,7 +11,7 @@ struct service_provider;
 
 struct user_request {
     int idx;
-    int id; /* user id */
+    int user_id; /* user id */
     enum { ACL_UPDATE, FILE_UPDATE } type;
     int counter;
     hash_t val; /* for ACL update, val=[root of ACL IOMT], for file
