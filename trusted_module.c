@@ -170,6 +170,19 @@ struct tm_cert tm_cert_node_update(struct trusted_module *tm, hash_t orig, hash_
 
 static struct tm_cert cert_null = { NONE };
 
+static const char *tm_error = NULL;
+static void tm_seterror(const char *error)
+{
+    tm_error = error;
+}
+
+static const char *tm_geterror(void)
+{
+    if(tm_error)
+        return tm_error;
+    return "success";
+}
+
 /* combine two NU certificates */
 struct tm_cert tm_cert_combine(struct trusted_module *tm,
                                const struct tm_cert *nu1, hash_t hmac1,
@@ -177,12 +190,21 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
                                hash_t *hmac_out)
 {
     if(!nu1 || !nu2)
+    {
+        tm_seterror("null certificate");
         return cert_null;
+    }
     if(nu1->type != NU || nu2->type != NU)
+    {
+        tm_seterror("wrong certificate type");
         return cert_null;
+    }
     if(!cert_verify(tm, nu1, hmac1) || !cert_verify(tm, nu2, hmac2))
+    {
+        tm_seterror("improper cert authentication");
         return cert_null;
-
+    }
+    
     if(hash_equals(nu1->nu.new_node, nu2->nu.orig_node) &&
        hash_equals(nu1->nu.new_root, nu2->nu.orig_root))
     {
@@ -197,7 +219,10 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
         return cert;
     }
     else
+    {
+        tm_seterror("hashes are not of the form a->b, b->c");
         return cert_null;
+    }
 }
 
 /* return true iff [b, bprime] encloses a */
@@ -411,12 +436,22 @@ static uint64_t hash_to_u64(hash_t h)
     return ret;
 }
 
+/* generate a signed acknowledgement for successful completion of a
+ * request */
+static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
+{
+    /* TODO */
+}
+
 /* execute a user request, if possible */
 /* 
  * This function handles all transformations on the IOMT except
  * inserting a placeholder (handled above). The function takes its
  * parameter in the form of a user_request struct, which must be
- * authenticated or else the function will fail. Based on the request
+ * authenticated or else the function will fail. When a request is
+ * successfully completed, *ack_hmac will be updated to the value
+ * HMAC(<request> + 1, K), where + denotes concatenation, and K is the
+ * shared secret between the user and module. Based on the request
  * contents, one of three actions are performed:
  *
  * 1) req->type == ACL_UPDATE and req->counter == 0:
@@ -460,11 +495,11 @@ static uint64_t hash_to_u64(hash_t h)
  * be updated to reflect the incremented file counter.
  */
 
-/* TODO: authenticated acknowledgement */
 struct tm_cert tm_request(struct trusted_module *tm,
                           const struct user_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
-                          struct tm_cert *vr_out, hash_t *vr_hmac)
+                          struct tm_cert *vr_out, hash_t *vr_hmac,
+                          hash_t *hmac_ack)
 {
     if(!req)
         return cert_null;
@@ -517,6 +552,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         cert.fr.acl = req->val;
 
         *hmac_out = cert_sign(tm, &cert);
+        *hmac_ack = req_ack(tm, req);
         return cert;
     }
 
@@ -587,6 +623,9 @@ struct tm_cert tm_request(struct trusted_module *tm,
         
         *vr_hmac = cert_sign(tm, &vr_cert);
         *vr_out = vr_cert;
+
+        tm->root = req->modify.ru_cert.ru.new_root;
+        *hmac_ack = req_ack(tm, req);
             
         return fr_cert;
     }
@@ -601,6 +640,9 @@ struct tm_cert tm_request(struct trusted_module *tm,
         cert.fr.acl = req->val;
         
         *hmac_out = cert_sign(tm, &cert);
+
+        tm->root = req->modify.ru_cert.ru.new_root;
+        *hmac_ack = req_ack(tm, req);
         return cert;
     }
 

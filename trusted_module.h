@@ -8,6 +8,7 @@
 #include "crypto.h"
 
 struct trusted_module;
+struct user_request;
 
 struct tm_cert {
     enum { NONE = 0, NU, EQ, RV, RU, FR, VR } type;
@@ -96,5 +97,11 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
 /* change internal IOMT root to equivalent root */
 bool tm_set_equiv_root(struct trusted_module *tm,
                        const struct tm_cert *cert_eq, hash_t hmac);
+
+struct tm_cert tm_request(struct trusted_module *tm,
+                          const struct user_request *req, hash_t req_hmac,
+                          hash_t *hmac_out,
+                          struct tm_cert *vr_out, hash_t *vr_hmac,
+                          hash_t *ack_hmac);
 
 #endif
