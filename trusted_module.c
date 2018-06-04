@@ -436,11 +436,27 @@ static uint64_t hash_to_u64(hash_t h)
     return ret;
 }
 
-/* generate a signed acknowledgement for successful completion of a
- * request */
+/* Generate a signed acknowledgement for successful completion of a
+ * request. We append a zero byte to the user request and take the
+ * HMAC. */
 static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
 {
-    /* TODO */
+    HMAC_CTX *ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx,
+                 tm->user_keys[req->user_id - 1].key,
+                 tm->user_keys[req->user_id - 1].len,
+                 EVP_sha256(), NULL);
+
+    HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
+
+    char zero = 0;
+    HMAC_Update(ctx, &zero, 1);
+
+    hash_t hmac;
+    HMAC_Final(ctx, hmac.hash, NULL);
+    HMAC_CTX_free(ctx);
+    
+    return hmac;
 }
 
 /* execute a user request, if possible */
