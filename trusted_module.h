@@ -98,6 +98,7 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
 bool tm_set_equiv_root(struct trusted_module *tm,
                        const struct tm_cert *cert_eq, hash_t hmac);
 
+/* process a user's request to transform the IOMT in some way */
 struct tm_cert tm_request(struct trusted_module *tm,
                           const struct user_request *req, hash_t req_hmac,
                           hash_t *hmac_out,

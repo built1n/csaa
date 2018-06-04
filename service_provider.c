@@ -8,9 +8,9 @@
 #include "trusted_module.h"
 
 struct file_version {
-    hash_t k; /* h(key, f_idx) */
-    hash_t l; /* h(encrypted contents, k) */
-    hash_t enc_key; /* XOR'd with h(k, module secret) */
+    hash_t kf; /* h(key, file_idx) */
+    hash_t l; /* h(h(file contents), kf) */
+    hash_t enc_key; /* XOR'd with h(kf, module secret) */
 
     struct tm_cert cert; /* VR certificate */
     hash_t cert_hmac;
@@ -26,8 +26,8 @@ struct file_record {
     struct iomt_node *acl;
     int acl_nodes;
 
-    struct tm_cert cert; /* FR cert */
-    hash_t cert_hmac;
+    struct tm_cert fr_cert; /* issued by module */
+    hash_t fr_hmac;
 
     struct file_version *versions;
     int n_versions;

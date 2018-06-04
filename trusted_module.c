@@ -70,6 +70,13 @@ bool hash_equals(hash_t a, hash_t b)
     return !memcmp(a.hash, b.hash, 32);
 }
 
+hash_t hash_xor(hash_t a, hash_t b)
+{
+    for(int i = 0; i < 32; ++i)
+        a.hash[i] ^= b.hash[i];
+    return a;
+}
+
 struct trusted_module *tm_new(const void *key, size_t keylen)
 {
     struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
@@ -168,7 +175,8 @@ struct tm_cert tm_cert_node_update(struct trusted_module *tm, hash_t orig, hash_
     return cert;
 }
 
-static struct tm_cert cert_null = { NONE };
+static const struct tm_cert cert_null = { NONE };
+static const struct hash_t hash_null = { { 0 } };
 
 static const char *tm_error = NULL;
 static void tm_seterror(const char *error)
@@ -664,6 +672,43 @@ struct tm_cert tm_request(struct trusted_module *tm,
 
     /* should not get here */
     assert(false);
+}
+
+/* enc_secret is encrypted by the user by XOR'ing the file encryption
+ * key with h(f + c_f + K), where + denotes concatenation. The purpose
+ * of this function is to decrypt the secret passed by the user,
+ * verify its integrity against kf=HMAC(secret, key=f_idx), and then
+ * re-encrypt the secret with the module's secret key. This is the
+ * F_rs() function described by Mohanty et al. */
+hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
+                                    uint64_t file_idx, uint64_t file_counter, uint64_t user_id, hash_t enc_secret, hash_t kf)
+{
+    hash_t pad; /* key = enc_secret ^ pad */
+    HMAC_CTX *ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx, tm->user_keys[user_id - 1].key, tm->user_keys[user_id - 1].len,
+                 EVP_sha256(), NULL);
+
+    HMAC_Update(ctx, (const unsigned char*)&file_idx, sizeof(file_idx));
+    HMAC_Update(ctx, (const unsigned char*)&file_counter, sizeof(file_counter));
+
+    HMAC_Final(ctx, pad.hash, NULL);
+    HMAC_CTX_free(ctx);
+
+    hash_t key = hash_xor(enc_secret, pad);
+
+    if(hash_equals(kf,
+                   hmac_sha256(key.hash, sizeof(key.hash),
+                               &file_idx, sizeof(file_idx))))
+    {
+        /* re-encrypt */
+        pad = hmac_sha256(kf.hash, sizeof(kf.hash),
+                          tm->secret, sizeof(tm->secret));
+
+        return hash_xor(key, pad);
+    }
+
+    /* failure */
+    return hash_null;
 }
 
 /* self-test */
