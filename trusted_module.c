@@ -661,7 +661,10 @@ void tm_test(void)
         hash_t node_new = sha256("b", 1);
         hash_t comp[] = { sha256("b", 1) };
         int orders[] = { 1 }; /* complementary node is right child */
-    
+        hash_t root_1, root_2, root_3;
+        root_1 = merkle_compute(node, comp, orders, 1);
+        root_2 = merkle_compute(node_new, comp, orders, 1);
+        
         hash_t hmac;
         struct tm_cert nu = tm_cert_node_update(tm, node, node_new, comp, orders, 1, &hmac);
         printf("NU generation: ");
@@ -675,8 +678,26 @@ void tm_test(void)
         hash_t bogus = { { 0 } };
         printf("Certificate verification 2: ");
         check(!cert_verify(tm, &nu, bogus));
+
+        /* test combining NU certificates */
+        hash_t node_3 = sha256("c", 1);
+        root_3 = merkle_compute(node_3, comp, orders, 1);
+        hash_t hmac2, hmac_cat;
+        struct tm_cert nu2 = tm_cert_node_update(tm, node_new, node_3, comp, orders, 1, &hmac2);
+        struct tm_cert cat = tm_cert_combine(tm, &nu, hmac, &nu2, hmac2, &hmac_cat);
+        printf("Combine NU certificates: ");
+        check(nu2.type == NU &&
+              cat.type == NU &&
+              hash_equals(cat.nu.orig_root, root_1) &&
+              hash_equals(cat.nu.orig_node, node) &&
+              hash_equals(cat.nu.new_root, root_3) &&
+              hash_equals(cat.nu.new_node, node_3) &&
+              cert_verify(tm, &cat, hmac_cat));
         
-    
         //tm_free(tm);
+    }
+
+    {
+        
     }
 }
