@@ -184,7 +184,7 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
         return cert_null;
 
     if(hash_equals(nu1->nu.new_node, nu2->nu.orig_node) &&
-       hash_equals(nu2->nu.new_root, nu2->nu.orig_root))
+       hash_equals(nu1->nu.new_root, nu2->nu.orig_root))
     {
         struct tm_cert cert;
         cert.type = NU;
