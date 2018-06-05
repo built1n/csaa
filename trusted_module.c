@@ -34,49 +34,6 @@ struct trusted_module {
     unsigned char secret[32];
 };
 
-static hash_t hmac_sha256(const void *data, size_t datalen, const void *key, size_t keylen)
-{
-    hash_t h;
-    HMAC(EVP_sha256(), key, keylen, data, datalen, h.hash, NULL);
-    return h;
-}
-
-static hash_t sha256(const void *data, size_t datalen)
-{
-    hash_t h;
-    SHA256(data, datalen, h.hash);
-    return h;
-}
-
-bool is_zero(hash_t u)
-{
-    /* constant-time comparison */
-    volatile char c = 0;
-    for(int i = 0; i < 32; ++i)
-        c |= u.hash[i];
-
-    return c == 0;
-}
-
-void dump_hash(hash_t u)
-{
-    for(int i = 0; i < 32; ++i)
-        printf("%02x", u.hash[i]);
-    printf("\n");
-}
-
-bool hash_equals(hash_t a, hash_t b)
-{
-    return !memcmp(a.hash, b.hash, 32);
-}
-
-hash_t hash_xor(hash_t a, hash_t b)
-{
-    for(int i = 0; i < 32; ++i)
-        a.hash[i] ^= b.hash[i];
-    return a;
-}
-
 struct trusted_module *tm_new(const void *key, size_t keylen)
 {
     struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
@@ -94,57 +51,15 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
 
     /* debugging */
     memset(tm->secret, 0, sizeof(tm->secret));
-    memset(tm->root.hash, 0, sizeof(tm->root.hash));
 
+    /* initialize with a node of (1, 0, 1) in the tree */
+    struct iomt_node boot;
+    boot.idx = 1;
+    memset(boot.val.hash, 0, sizeof(boot.val.hash));
+    boot.next_idx = 1;
+    tm->root = merkle_compute(hash_node(&boot), NULL, NULL, 0);
+    
     return tm;
-}
-
-/* NOTE: we fail to distinguish between intermediate and leaf
- * nodes, making a second-preimage attack possible */
-/* order: 0: u is left, v is right, 1: u is right, v is left */
-static hash_t merkle_parent(hash_t u, hash_t v, int order)
-{
-    if(is_zero(u))
-        return v;
-    if(is_zero(v))
-        return u;
-
-    /* append and hash */
-    SHA256_CTX ctx;
-    hash_t h;
-
-    SHA256_Init(&ctx);
-
-    if(order != 0)
-        SHA256_Update(&ctx, v.hash, 32);
-
-    SHA256_Update(&ctx, u.hash, 32);
-
-    if(order == 0)
-        SHA256_Update(&ctx, v.hash, 32);
-
-    SHA256_Final(h.hash, &ctx);
-
-    return h;
-}
-
-/* Calculate the root of a Merkle tree given the leaf node v, and n
- * complementary nodes, ordered from the closest node (the sibling
- * leaf node at the bottom of the tree) to most distant (the opposite
- * half of the tree). orders[i] represents whether each complementarty
- * node is a left or right child, which is necessary to compute the
- * proper hash value at each stage. This is the f_bt() algorithm
- * described in Mohanty et al. */
-
-/* orders: 0 indiciates that the complementary node is LEFT child, 1:
- * node is RIGHT child */
-static hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t n)
-{
-    hash_t parent = node;
-    for(size_t i = 0; i < n; ++i)
-        parent = merkle_parent(comp[i], parent, orders[i]);
-
-    return parent;
 }
 
 static hash_t cert_sign(struct trusted_module *tm, const struct tm_cert *cert)
@@ -184,7 +99,7 @@ static void tm_seterror(const char *error)
     tm_error = error;
 }
 
-static const char *tm_geterror(void)
+const char *tm_geterror(void)
 {
     if(tm_error)
         return tm_error;
@@ -231,17 +146,6 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
         tm_seterror("hashes are not of the form a->b, b->c");
         return cert_null;
     }
-}
-
-/* return true iff [b, bprime] encloses a */
-static bool encloses(int b, int bprime, int a)
-{
-    return (b < a < bprime) || (bprime <= b && b < a) || (a < bprime && bprime <= b);
-}
-
-static hash_t hash_node(const struct iomt_node *node)
-{
-    return sha256(node, sizeof(*node));
 }
 
 /* Let ve = h(b, b', wb). */
@@ -363,12 +267,21 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
                                      hash_t *hmac_out)
 {
     if(!nu)
+    {
+        tm_seterror("null certificate");
         return cert_null;
+    }
     if(nu->type != NU)
+    {
+        tm_seterror("not NU certificate");
         return cert_null;
+    }
     if(!cert_verify(tm, nu, nu_hmac))
+    {
+        tm_seterror("improper certificate authentication");
         return cert_null;
-
+    }
+    
     hash_t orig_h = hash_node(node);
 
     struct iomt_node new_node = *node;
@@ -377,8 +290,11 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
     hash_t new_h = hash_node(&new_node);
 
     if(!hash_equals(nu->nu.orig_node, orig_h) || !hash_equals(nu->nu.new_node, new_h))
+    {
+        tm_seterror("NU hashes do not match node hashes");
         return cert_null;
-
+    }
+    
     struct tm_cert cert;
     memset(&cert, 0, sizeof(cert));
 
@@ -421,7 +337,7 @@ bool tm_set_equiv_root(struct trusted_module *tm,
 }
 
 /* user id is 1-indexed */
-static hash_t req_sign(struct trusted_module *tm, const struct user_request *req, int id)
+hash_t req_sign(struct trusted_module *tm, const struct user_request *req, int id)
 {
     return hmac_sha256(req, sizeof(*req), tm->user_keys[id - 1].key, tm->user_keys[id - 1].len);
 }
@@ -433,15 +349,6 @@ static bool req_verify(struct trusted_module *tm, const struct user_request *req
         return false;
     hash_t calculated = req_sign(tm, req, id);
     return hash_equals(calculated, hmac);
-}
-
-/* convert the first 8 bytes (little endian) to a 64-bit int */
-static uint64_t hash_to_u64(hash_t h)
-{
-    uint64_t ret = 0;
-    for(int i = 0; i < 8; ++i)
-        ret |= h.hash[i] << (i * 8);
-    return ret;
 }
 
 /* Generate a signed acknowledgement for successful completion of a
@@ -457,7 +364,7 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
 
     HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
 
-    char zero = 0;
+    unsigned char zero = 0;
     HMAC_Update(ctx, &zero, 1);
 
     hash_t hmac;
@@ -528,8 +435,11 @@ struct tm_cert tm_request(struct trusted_module *tm,
     if(!req)
         return cert_null;
     if(!req_verify(tm, req, req->user_id, req_hmac))
+    {
+        tm_seterror("improper authentication");
         return cert_null;
-
+    }
+    
     /* invalid request type */
     if(req->type != ACL_UPDATE && req->type != FILE_UPDATE)
         return cert_null;
@@ -550,7 +460,10 @@ struct tm_cert tm_request(struct trusted_module *tm,
 
         /* first check the validity of the certificate */
         if(!cert_verify(tm, &req->create.ru_cert, req->create.ru_hmac))
+        {
+            tm_seterror("RU cert invalid");
             return cert_null;
+        }
 
         /* verify that:
            - the certificate has the same file index as the request
@@ -562,8 +475,17 @@ struct tm_cert tm_request(struct trusted_module *tm,
            !is_zero(req->create.ru_cert.ru.orig_val)   ||
            !hash_equals(req->create.ru_cert.ru.orig_root, tm->root) ||
            !hash_equals(req->create.ru_cert.ru.new_val, one))
+        {
+            tm_seterror("RU cert does not show needed information");
+            printf("%d %d %d %d\n", req->create.ru_cert.ru.idx != req->idx,
+                   !is_zero(req->create.ru_cert.ru.orig_val),
+                   !hash_equals(req->create.ru_cert.ru.orig_root, tm->root),
+                   !hash_equals(req->create.ru_cert.ru.new_val, one));
+            dump_hash(req->create.ru_cert.ru.orig_root);
+            dump_hash(tm->root);
             return cert_null;
-
+        }
+            
         /* update the IOMT root */
         tm->root = req->create.ru_cert.ru.new_root;
 
@@ -712,9 +634,12 @@ hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
 }
 
 /* self-test */
+const char *tm_geterror(void);
 void check(int condition)
 {
     printf(condition ? "PASS\n" : "FAIL\n");
+    if(!condition)
+        printf("%s\n", tm_geterror());
 }
 
 void tm_test(void)
