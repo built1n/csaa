@@ -66,6 +66,7 @@ struct tm_cert sp_request(struct service_provider *sp,
     return tm_request(sp->tm, req, req_hmac, hmac_out, vr_out, vr_hmac, ack_hmac);
 }
 
+/* in trusted_module.c */
 void check(int condition);
 
 void sp_test(void)
@@ -122,4 +123,40 @@ void sp_test(void)
     check(fr_cert.type == FR &&
           fr_cert.fr.counter == 1 &&
           fr_cert.fr.version == 0);
+
+    /* modification */
+    struct user_request mod;
+    mod.type = FILE_UPDATE;
+    mod.idx = 1;
+    mod.user_id = 1;
+    mod.counter = 1;
+    mod.modify.fr_cert = fr_cert;
+    mod.modify.fr_hmac = fr_hmac;
+
+    mod.modify.rv_cert = cert_rv(sp->tm,
+				 &acl_node,
+				 NULL, NULL, 0,
+				 &mod.modify.rv_hmac);
+
+    struct iomt_node node2;
+    node2.idx = 1;
+    node2.val = one;
+    node2.next_idx = 1;
+        
+    hash_t two;
+    memset(&two, 0, sizeof(two));
+    two.hash[0] = 2;
+    mod.modify.ru_cert = cert_ru(sp->tm, &node2, two,
+                                NULL, NULL, 0,
+                                &mod.modify.ru_hmac,
+                                0, NULL, NULL);
+
+    req_hmac = hmac_sha256(&mod, sizeof(mod), "a", 1);
+
+    struct tm_cert vr;
+    hash_t vr_hmac;
+    
+    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, &ack_hmac);
+    printf("File modification: ");
+    check(new_fr.type == FR);
 }
