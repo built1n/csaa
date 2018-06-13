@@ -59,6 +59,12 @@ hash_t hash_xor(hash_t a, hash_t b)
     return a;
 }
 
+void hash_zero(hash_t *h)
+{
+    for(int i = 0; i < 32; ++i)
+        h->hash[i] = 0;
+}
+
 /* NOTE: we fail to distinguish between intermediate and leaf
  * nodes, making a second-preimage attack possible */
 /* order: 0: u is left, v is right, 1: u is right, v is left */

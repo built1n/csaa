@@ -58,7 +58,7 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
     memset(boot.val.hash, 0, sizeof(boot.val.hash));
     boot.next_idx = 1;
     tm->root = merkle_compute(hash_node(&boot), NULL, NULL, 0);
-    
+
     return tm;
 }
 
@@ -89,9 +89,6 @@ struct tm_cert tm_cert_node_update(struct trusted_module *tm, hash_t orig, hash_
 
     return cert;
 }
-
-static const struct tm_cert cert_null = { NONE };
-static const struct hash_t hash_null = { { 0 } };
 
 static const char *tm_error = NULL;
 static void tm_seterror(const char *error)
@@ -127,7 +124,7 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
         tm_seterror("improper cert authentication");
         return cert_null;
     }
-    
+
     if(hash_equals(nu1->nu.new_node, nu2->nu.orig_node) &&
        hash_equals(nu1->nu.new_root, nu2->nu.orig_root))
     {
@@ -281,7 +278,7 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
         tm_seterror("improper certificate authentication");
         return cert_null;
     }
-    
+
     hash_t orig_h = hash_node(node);
 
     struct iomt_node new_node = *node;
@@ -294,7 +291,7 @@ struct tm_cert tm_cert_record_update(struct trusted_module *tm,
         tm_seterror("NU hashes do not match node hashes");
         return cert_null;
     }
-    
+
     struct tm_cert cert;
     memset(&cert, 0, sizeof(cert));
 
@@ -370,12 +367,12 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
     hash_t hmac;
     HMAC_Final(ctx, hmac.hash, NULL);
     HMAC_CTX_free(ctx);
-    
+
     return hmac;
 }
 
 /* execute a user request, if possible */
-/* 
+/*
  * This function handles all transformations on the IOMT except
  * inserting a placeholder (handled above). The function takes its
  * parameter in the form of a user_request struct, which must be
@@ -439,7 +436,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         tm_seterror("improper authentication");
         return cert_null;
     }
-    
+
     /* invalid request type */
     if(req->type != ACL_UPDATE && req->type != FILE_UPDATE)
         return cert_null;
@@ -485,7 +482,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
             dump_hash(tm->root);
             return cert_null;
         }
-            
+
         /* update the IOMT root */
         tm->root = req->create.ru_cert.ru.new_root;
 
@@ -513,7 +510,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         return cert_null;
     if(!cert_verify(tm, &req->modify.ru_cert, req->modify.ru_hmac))
         return cert_null;
-    
+
     /* check that FR and RU certificate indices match request index */
     if(req->modify.fr_cert.fr.idx != req->idx ||
        req->modify.ru_cert.ru.idx != req->idx)
@@ -531,7 +528,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
      * the counter value. */
     if(hash_to_u64(req->modify.ru_cert.ru.orig_val) + 1 != hash_to_u64(req->modify.ru_cert.ru.new_val))
         return cert_null;
-    
+
     /* check access level using RV cert, which verifies a record in
      * the ACL tree. */
     if(!hash_equals(req->modify.fr_cert.fr.acl, req->modify.rv_cert.rv.root))
@@ -546,7 +543,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
     /* no write access to file or ACL */
     if(access < 2)
         return cert_null;
-    
+
     /* file update */
     if(req->type == FILE_UPDATE)
     {
@@ -566,13 +563,13 @@ struct tm_cert tm_request(struct trusted_module *tm,
         vr_cert.vr.idx = req->idx;
         vr_cert.vr.version = req->modify.fr_cert.fr.version + 1;
         vr_cert.vr.hash = req->val;
-        
+
         *vr_hmac = cert_sign(tm, &vr_cert);
         *vr_out = vr_cert;
 
         tm->root = req->modify.ru_cert.ru.new_root;
         *hmac_ack = req_ack(tm, req);
-            
+
         return fr_cert;
     }
     else if(req->type == ACL_UPDATE)
@@ -584,7 +581,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         cert.fr.counter = req->counter + 1;
         cert.fr.version = req->modify.fr_cert.fr.version;
         cert.fr.acl = req->val;
-        
+
         *hmac_out = cert_sign(tm, &cert);
 
         tm->root = req->modify.ru_cert.ru.new_root;
@@ -680,7 +677,7 @@ void tm_test(void)
         printf("Merkle compute: ");
         check(hash_equals(root1, root2));
     }
-    
+
     {
         /* check NU certificate generation */
         struct trusted_module *tm = tm_new("a", 1);
@@ -692,7 +689,7 @@ void tm_test(void)
         hash_t root_1, root_2, root_3;
         root_1 = merkle_compute(node, comp, orders, 1);
         root_2 = merkle_compute(node_new, comp, orders, 1);
-        
+
         hash_t hmac;
         struct tm_cert nu = tm_cert_node_update(tm, node, node_new, comp, orders, 1, &hmac);
         printf("NU generation: ");
@@ -721,11 +718,11 @@ void tm_test(void)
               hash_equals(cat.nu.new_root, root_3) &&
               hash_equals(cat.nu.new_node, node_3) &&
               cert_verify(tm, &cat, hmac_cat));
-        
+
         //tm_free(tm);
     }
 
     {
-        
+
     }
 }

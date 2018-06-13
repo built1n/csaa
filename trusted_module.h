@@ -48,6 +48,42 @@ struct tm_cert {
     };
 };
 
+struct user_request {
+    int idx;
+    int user_id; /* user id */
+    enum { ACL_UPDATE, FILE_UPDATE } type;
+    int counter;
+    hash_t val; /* for ACL update, val=[root of ACL IOMT], for file
+                 * update, val is a commitment to the contents, key,
+                 * and index of the file */
+    union {
+        /* if counter = 0 and type = ACL_UPDATE, create a new file with given ACL */
+        struct {
+            struct tm_cert ru_cert;
+            hash_t ru_hmac;
+        } create;
+
+        /* otherwise the request is to modify either the file or
+         * ACL */
+        struct {
+            /* FR certificate verifying file ACL and counter */
+            struct tm_cert fr_cert;
+            hash_t fr_hmac;
+
+            /* RV certificate verifying that user is in the ACL */
+            struct tm_cert rv_cert;
+            hash_t rv_hmac;
+
+            /* RU certificate indicating updated counter value in
+             * IOMT */
+            struct tm_cert ru_cert;
+            hash_t ru_hmac;
+        } modify;
+    };
+};
+
+static const struct tm_cert cert_null = { NONE };
+
 /* creates 1 user with given shared secret */
 struct trusted_module *tm_new(const void *key, size_t keylen);
 void tm_free(struct trusted_module *tm);
@@ -60,14 +96,28 @@ void tm_test(void);
  * NULL). Passing the [return, orig, new, orig_root, new_root] to the
  * module in the future will serve to verify this check. */
 /* complementary nodes and order are passed as usual */
-struct tm_cert tm_cert_node_update(struct trusted_module *tm, hash_t orig, hash_t new, const hash_t *comp, const int *orders, size_t n, hash_t *hmac);
+struct tm_cert tm_cert_node_update(struct trusted_module *tm,
+                                   hash_t orig, hash_t new,
+                                   const hash_t *comp, const int *orders, size_t n,
+                                   hash_t *hmac);
 
 /* takes two NU certificates, one stating [a is child of x]->[b is
  * child of y], and one stating [b is child of y]->[c is child of z],
  * and generate a certificate stating [a is child of x]->[c is child
  * of z] */
-struct tm_cert tm_cert_combine(struct trusted_module *tm, const struct tm_cert *nu1, hash_t hmac1, const struct tm_cert *nu2, hash_t hmac2, hash_t *hmac_out);
+struct tm_cert tm_cert_combine(struct trusted_module *tm,
+                               const struct tm_cert *nu1, hash_t hmac1,
+                               const struct tm_cert *nu2, hash_t hmac2,
+                               hash_t *hmac_out);
 
+/* Let ve = h(b, b', wb). */
+/* Let ve' = h(b, a, wb). */
+/* Let vi' = h(a, b', 0). */
+/* nu_encl should certify that given [ve is child of y], then [ve' is child of y'] */
+/* nu_ins should certify that given [0 is child of y'], then [vi' is child of y''] */
+/* this function will then issue a certificate verifying that y and
+ * y'' are equivalent roots, indicating that they differ only in y''
+ * having an additional placeholder node with index a */
 struct tm_cert tm_cert_equiv(struct trusted_module *tm,
                              const struct tm_cert *nu_encl, hash_t hmac_encl,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
