@@ -83,6 +83,88 @@ static hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n)
     return ret;
 }
 
+static void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n)
+{
+    for(int i = 0; i < n; ++i)
+        nodes[indices[i]] = values[i];
+}
+
+/* Update mt_nodes to reflect a change to a leaf node's
+ * value. Optionally, if old_dep is not NULL, *old_dep will be made to
+ * point to an array of length mt_logleaves that contains the old node
+ * values (whose indices are returned by merkle_dependents()). Untested. */
+static void update_tree(struct service_provider *sp, int leafidx, hash_t newval,
+                        hash_t **old_dep)
+{
+    if(old_dep)
+        *old_dep = calloc(sp->mt_logleaves, sizeof(hash_t));
+
+    int idx = (1 << sp->mt_logleaves) - 1 + leafidx;
+
+    sp->mt_nodes[idx] = newval;
+    for(int i = 0; i < sp->mt_logleaves; ++i)
+    {
+        /* find the merkle parent of the two children first */
+        hash_t parent = merkle_parent(sp->mt_nodes[idx],
+                                      sp->mt_nodes[bintree_sibling(idx)],
+                                      (idx + 1) & 1);
+
+        idx = bintree_parent(idx);
+
+        /* save old value */
+        if(old_dep)
+            (*old_dep)[i] = sp->mt_nodes[idx];
+
+        sp->mt_nodes[idx] = parent;
+    }
+}
+
+/* Generate an EQ certificate for inserting a placeholder with index
+ * placeholder_idx, given an encloser (which must actually enclose
+ * a). Note: this function will modify the *mt_nodes array to reflect
+ * the modification of the encloser node. However, it will restore the
+ * original values before returning. This function belongs in here
+ * service_provider.c and not helper.c since it directly accesses
+ * service-provider specific functionality. */
+struct tm_cert cert_eq(struct trusted_module *tm,
+                      const struct iomt_node *encloser,
+                      int placeholder_idx,
+                      hash_t *mt_nodes,
+                      const int *enc_comp, const int *enc_orders, size_t enc_n,
+                      const int *ins_comp, const int *ins_orders, size_t ins_n,
+                      hash_t *hmac_out)
+{
+    assert(encloses(encloser->idx, encloser->next_idx, placeholder_idx));
+
+    struct iomt_node encloser_mod = *encloser;
+    encloser_mod.next_idx = placeholder_idx;
+
+    struct iomt_node insert;
+    insert.idx = placeholder_idx;
+    insert.next_idx = encloser->next_idx;
+    insert.val = hash_null;
+
+    hash_t h_enc    = hash_node(encloser);
+    hash_t h_encmod = hash_node(&encloser_mod);
+
+    hash_t h_ins = hash_node(&insert);
+
+    /* we need two NU certificates */
+    hash_t nu1_hmac, nu2_hmac;
+
+    struct tm_cert nu1 = tm_cert_node_update(tm,
+                                             h_enc, h_encmod,
+                                             enc_comp, enc_orders, enc_n,
+                                             &nu1_hmac);
+    /* FIXME: the complement will change upon changing this node, so
+     * cert_equiv() will fail. */
+    struct tm_cert nu2 = tm_cert_node_update(tm,
+                                             hash_null, h_ins,
+                                             ins_comp, ins_orders, ins_n,
+                                             &nu2_hmac);
+    return tm_cert_equiv(tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_idx, hmac_out);
+}
+
 /* Calculate the value of all the nodes of the tree, given the IOMT
  * leaves in mt_leaves. Leaf count *must* be an integer power of two,
  * otherwise bad things will happen. This function should only need to
@@ -310,6 +392,14 @@ void sp_test(void)
     int correct[] = { 22, 9, 3, 2 };
     int correct_orders[] = { 1, 0, 0, 1 };
     check(!memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
+    free(orders);
+    free(comp);
+
+    printf("Dependency calculation: ");
+    int *dep = merkle_dependents(6, 4);
+    int correct_dep[] = { 10, 4, 1, 0 };
+    check(!memcmp(dep, correct_dep, 4 * sizeof(int)));
+    free(dep);
 
     /* broken */
 #if 0

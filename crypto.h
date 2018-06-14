@@ -48,6 +48,13 @@ hash_t merkle_parent(hash_t u, hash_t v, int order);
 int *merkle_complement(int leafidx, int logleaves, int **orders);
 int *merkle_complement_orders(int leafidx, int logleaves);
 
+/* Return an array of indices of tree nodes that are dependent on a
+ * given leaf node. Will be ordered from nearest relative to root. */
+int *merkle_dependents(int leafidx, int logleaves);
+
+int bintree_parent(int idx);
+int bintree_sibling(int idx);
+
 uint64_t hash_to_u64(hash_t h);
 void dump_hash(hash_t u);
 

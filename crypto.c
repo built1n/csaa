@@ -113,6 +113,18 @@ hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t
     return parent;
 }
 
+/* Given a node's index, return the index of the parent in an array
+ * representation of a binary tree. */
+int bintree_parent(int idx)
+{
+    return (idx - ((idx & 1) ? 1 : 2)) / 2;
+}
+
+int bintree_sibling(int idx)
+{
+    return idx + ((idx & 1) ? 1 : -1);
+}
+
 /* Calculate the indicies of the complementary nodes to a
  * leaf. `leafidx' is 0 for the rightmost leaf node. This function
  * will return an array with a length equal to the number of levels in
@@ -137,16 +149,31 @@ int *merkle_complement(int leafidx, int logleaves, int **orders)
     for(int i = 0; i < logleaves; ++i)
     {
         /* output index of sibling node */
-        comp[i] = idx + ((idx & 1) ? 1 : -1);
+        comp[i] = bintree_sibling(idx);
 
+        /* we really don't need the orders array */
         if(orders)
-            (*orders)[i] = ((idx&1) ? 1 : 0);
+            (*orders)[i] = idx & 1;
 
         /* find parent index and loop */
-        idx = (idx - ((idx & 1) ? 1 : 2)) / 2;
+        idx = bintree_parent(idx);
     }
 
     return comp;
+}
+
+int *merkle_dependents(int leafidx, int logleaves)
+{
+    int *dep = calloc(logleaves, sizeof(int));
+
+    int idx = (1 << logleaves) - 1 + leafidx;
+    for(int i = 0; i < logleaves; ++i)
+    {
+        idx = bintree_parent(idx);
+        dep[i] = idx;
+    }
+
+    return dep;
 }
 
 /* Shim to get only the orders */
