@@ -342,15 +342,21 @@ bool tm_set_equiv_root(struct trusted_module *tm,
     if(!cert_verify(tm, cert_eq, hmac))
         return false;
 
+    printf("Current root: ");
+    dump_hash(tm->root);
+    printf("New root: ");
+
     if(hash_equals(tm->root, cert_eq->eq.orig_root))
     {
         tm->root = cert_eq->eq.new_root;
+        dump_hash(tm->root);
         return true;
     }
 
     if(hash_equals(tm->root, cert_eq->eq.new_root))
     {
         tm->root = cert_eq->eq.orig_root;
+        dump_hash(tm->root);
         return true;
     }
 
@@ -624,7 +630,10 @@ struct tm_cert tm_request(struct trusted_module *tm,
  * re-encrypt the secret with the module's secret key. This is the
  * F_rs() function described by Mohanty et al. */
 hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
-                                    uint64_t file_idx, uint64_t file_counter, uint64_t user_id, hash_t enc_secret, hash_t kf)
+                                    uint64_t file_idx,
+                                    uint64_t file_counter,
+                                    uint64_t user_id,
+                                    hash_t enc_secret, hash_t kf)
 {
     hash_t pad; /* key = enc_secret ^ pad */
     HMAC_CTX *ctx = HMAC_CTX_new();
@@ -658,7 +667,7 @@ hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
 const char *tm_geterror(void);
 void check(int condition)
 {
-    printf(condition ? "PASS\n" : "FAIL\n");
+    printf(condition ? "\033[32;1mPASS\033[0m\n" : "\033[31;1mFAIL\033[0m\n");
     if(!condition)
         printf("%s\n", tm_geterror());
 }
