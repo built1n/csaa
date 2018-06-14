@@ -1,6 +1,7 @@
 /* implementation of a basic service provider for use with the trusted
  * module */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -27,8 +28,8 @@ struct file_record {
     int version;
     int counter;
 
-    struct iomt_node *acl;
-    int acl_nodes;
+    struct iomt_node *acl_leaves;
+    int acl_nleaves;
 
     struct tm_cert fr_cert; /* issued by module */
     hash_t fr_hmac;
@@ -43,10 +44,10 @@ struct service_provider {
     /* stored in sorted order; eventually a hash table would be
      * wise */
     struct file_record *records;
-    size_t nrecords; /* must be an integer power of two */
+    size_t nrecords;
 
     struct iomt_node *mt_leaves; /* leaves of CDI-IOMT, value is counter */
-    int mt_leafcount;
+    int mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
 
     /* Each level of the IOMT is stored sequentially from left to
      * right, top to bottom, as follows:
@@ -66,6 +67,48 @@ struct service_provider {
                        * the leaf nodes. */
 };
 
+/* A bit of a hack: our complement calculation returns the *indices*
+ * complementary nodes, which is good because the indices are much
+ * smaller than the actual nodes (which are 32 bytes each with
+ * SHA-256). However, the trusted module requires an array of the
+ * actual hash values of the complementary nodes. It would be optimal
+ * to modify each function to take the array of all nodes in the tree
+ * in addition to the complement indices, but this function will serve
+ * as a shim in the meantime. */
+static hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n)
+{
+    hash_t *ret = calloc(n, sizeof(hash_t));
+    for(int i = 0; i < n; ++i)
+        ret[i] = nodes[indices[i]];
+    return ret;
+}
+
+/* Calculate the value of all the nodes of the tree, given the IOMT
+ * leaves in mt_leaves. Leaf count *must* be an integer power of two,
+ * otherwise bad things will happen. This function should only need to
+ * be called once, namely when the service provider is created. */
+static void fill_tree(struct service_provider *sp)
+{
+    for(int i = 0; i < sp->mt_leafcount; ++i)
+    {
+        int mt_idx = (1 << sp->mt_logleaves) - 1 + i;
+        sp->mt_nodes[mt_idx] = hash_node(sp->mt_leaves + i);
+    }
+    /* now loop up from the bottom level, calculating the parent of
+     * each pair of nodes */
+    for(int i = sp->mt_logleaves - 1; i >= 0; --i)
+    {
+        int baseidx = (1 << i) - 1;
+        for(int j = 0; j < (1 << i); ++j)
+        {
+            int mt_idx = baseidx + j;
+            sp->mt_nodes[mt_idx] = merkle_parent(sp->mt_nodes[2 * mt_idx + 1],
+                                                 sp->mt_nodes[2 * mt_idx + 2],
+                                                 0);
+        }
+    }
+}
+
 /* leaf count will be 2^logleaves */
 struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 {
@@ -74,46 +117,35 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
     sp->tm = tm_new(key, keylen);
 
     sp->mt_leafcount = 1 << logleaves;
+    sp->mt_logleaves = logleaves;
     sp->mt_leaves = calloc(sp->mt_leafcount, sizeof(struct iomt_node));
 
     sp->mt_nodes = calloc(2 * sp->mt_leafcount - 1, sizeof(hash_t));
+
+    /* The trusted module initializes itself with a single placeholder
+     * node (1,0,1). We first update our list of IOMT leaves. Then we
+     * insert our desired number of nodes by using EQ certificates to
+     * update the internal IOMT root. Note that leaf indices are
+     * 1-indexed. */
+    for(int i = 0; i < sp->mt_leafcount - 1; ++i)
+        sp->mt_leaves[i] = (struct iomt_node) { i + 1, i + 2, hash_null };
+
+    /* loop around */
+    sp->mt_leaves[sp->mt_leafcount - 1] = (struct iomt_node) { sp->mt_leafcount, 1, hash_null };
+
+    fill_tree(sp);
 
     /* everything else is already zeroed by calloc */
     return sp;
 }
 
-/* Calculate the indicies of the complementary nodes to a
- * leaf. `leafidx' is 0 for the rightmost leaf node. This function
- * will return an array with a length equal to the number of levels in
- * the tree minus one (the root is not a complentary node). The 0th
- * element of the returned array will be the index of the immediate
- * sibling, while the 1st element will be the index of the
- * complementary node one level above the leaf node, and so on. Note
- * that logleaves = log2(nleaves) */
-static int *merkle_complement(int leafidx, int logleaves)
-{
-    int *comp = calloc(logleaves, sizeof(int));
-
-    /* true index of leaf */
-    int idx = (1 << logleaves) - 1 + leafidx;
-
-    /* progress up the tree */
-    for(int i = 0; i < logleaves; ++i)
-    {
-        /* output index of sibling node */
-        comp[i] = idx + ((idx & 1) ? 1 : -1);
-
-        /* find parent index and loop */
-        idx = (idx - ((idx & 1) ? 1 : 2)) / 2;
-    }
-
-    return comp;
-}
-
 /* linear search for record given idx */
 static struct file_record *lookup_record(struct service_provider *sp, int idx)
 {
-    /* TODO */
+    for(int i = 0; i < sp->nrecords; ++i)
+        if(idx == sp->records[i].idx)
+            return sp->records + i;
+    return NULL;
 }
 
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
@@ -151,11 +183,16 @@ struct tm_cert sp_request(struct service_provider *sp,
             need_insert = true;
         }
 
+        rec->version = fr.fr.version;
+        rec->counter = fr.fr.counter;
+        rec->fr_cert = fr;
+        rec->fr_hmac = fr_hmac;
 
-
-        /* TODO */
         if(need_insert)
             insert_record(sp, rec);
+
+        /* update our tree */
+        /* TODO */
     }
 
     /* return values to caller */
@@ -177,7 +214,8 @@ void check(int condition);
 void sp_test(void)
 {
     /* 2^10 = 1024 leaves ought to be enough for anybody */
-    struct service_provider *sp = sp_new("a", 1, 10);
+    int logleaves = 1;
+    struct service_provider *sp = sp_new("a", 1, logleaves);
     /* construct a request to create a file */
     struct user_request req;
     req.idx = 1;
@@ -267,7 +305,39 @@ void sp_test(void)
     check(new_fr.type == FR);
 
     printf("Complement calculation: ");
-    int *comp = merkle_complement(6, 4);
+    int *orders;
+    int *comp = merkle_complement(6, 4, &orders);
     int correct[] = { 22, 9, 3, 2 };
-    check(!memcmp(comp, correct, 4 * sizeof(int)));
+    int correct_orders[] = { 1, 0, 0, 1 };
+    check(!memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
+
+    /* broken */
+#if 0
+    {
+        int *orders_enc, *orders_ins;
+        int *compidx_enc, *compidx_ins;
+        compidx_enc = merkle_complement(0, 1, &orders_enc);
+        compidx_ins = merkle_complement(1, 1, &orders_ins);
+        hash_t *comp_enc = lookup_nodes(sp->mt_nodes, compidx_enc, logleaves);
+        hash_t *comp_ins = lookup_nodes(sp->mt_nodes, compidx_ins, logleaves);
+
+        hash_t hmac;
+        struct tm_cert eq = cert_eq(sp->tm, sp->mt_leaves + 0, 2,
+                                    comp_enc, orders_enc, logleaves,
+                                    comp_ins, orders_ins, logleaves,
+                                    &hmac);
+        /* broken */
+        printf("EQ generation: ");
+        check(eq.type == EQ);
+    }
+#endif
+
+    /* test tree initilization (only simple case) */
+    if(logleaves == 1)
+    {
+        struct iomt_node a = { 1, 2, hash_null };
+        struct iomt_node b = { 2, 1, hash_null };
+        printf("Merkle tree initialization: ");
+        check(hash_equals(sp->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
+    }
 }

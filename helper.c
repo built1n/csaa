@@ -76,7 +76,8 @@ struct tm_cert cert_eq(struct trusted_module *tm,
                                              h_enc, h_encmod,
                                              enc_comp, enc_orders, enc_n,
                                              &nu1_hmac);
-
+    /* FIXME: the complement will change upon changing this node, so
+     * cert_equiv() will fail. */
     struct tm_cert nu2 = tm_cert_node_update(tm,
                                              hash_null, h_ins,
                                              ins_comp, ins_orders, ins_n,

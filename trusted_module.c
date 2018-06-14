@@ -38,25 +38,22 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
 {
     struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
 
-    if(!RAND_bytes(tm->secret, 32))
+    if(!RAND_bytes(tm->secret, sizeof(tm->secret)))
     {
         free(tm);
         return NULL;
     }
+
+    /* debugging */
+    memset(tm->secret, 0, sizeof(tm->secret));
 
     tm->user_keys = calloc(1, sizeof(*tm->user_keys));
     tm->n_users = 1;
     tm->user_keys[0].key = key;
     tm->user_keys[0].len = keylen;
 
-    /* debugging */
-    memset(tm->secret, 0, sizeof(tm->secret));
-
     /* initialize with a node of (1, 0, 1) in the tree */
-    struct iomt_node boot;
-    boot.idx = 1;
-    memset(boot.val.hash, 0, sizeof(boot.val.hash));
-    boot.next_idx = 1;
+    struct iomt_node boot = (struct iomt_node) { 1, 1, hash_null };
     tm->root = merkle_compute(hash_node(&boot), NULL, NULL, 0);
 
     return tm;
@@ -160,15 +157,30 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
                              int a, hash_t *hmac_out)
 {
     if(!nu_encl || !nu_ins)
+    {
+        tm_seterror("null certificate");
         return cert_null;
+    }
     if(nu_encl->type != NU || nu_ins->type != NU)
+    {
+        tm_seterror("one or both certificates are not NU certificates");
         return cert_null;
+    }
     if(!cert_verify(tm, nu_encl, hmac_encl) || !cert_verify(tm, nu_ins, hmac_ins))
+    {
+        tm_seterror("invalid authentication");
         return cert_null;
+    }
     if(!encloses(encloser->idx, encloser->next_idx, a))
+    {
+        tm_seterror("encloser does not actually enclose placeholder index");
         return cert_null;
+    }
     if(!hash_equals(nu_encl->nu.new_root, nu_ins->nu.orig_root))
+    {
+        tm_seterror("NU certificates do not form a chain");
         return cert_null;
+    }
 
     hash_t ve = hash_node(encloser);
     struct iomt_node encloser_mod = *encloser;
@@ -183,13 +195,25 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
     hash_t viprime = hash_node(&ins);
 
     if(!hash_equals(nu_encl->nu.orig_node, ve))
+    {
+        tm_seterror("NU certificate does not contain hash of encloser node as original node value");
         return cert_null;
+    }
     if(!hash_equals(nu_encl->nu.new_node, veprime))
+    {
+        tm_seterror("NU certificate does not contain hash of modified encloser as new node");
         return cert_null;
+    }
     if(!is_zero(nu_ins->nu.orig_node))
+    {
+        tm_seterror("NU certificate does not have zero for original node");
         return cert_null;
+    }
     if(!hash_equals(nu_ins->nu.new_node, viprime))
+    {
+        tm_seterror("NU certificate does not have placeholder as new node");
         return cert_null;
+    }
 
     /* we can now certify that y and y'' are equivalent roots */
     struct tm_cert cert;

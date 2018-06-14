@@ -113,6 +113,50 @@ hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t
     return parent;
 }
 
+/* Calculate the indicies of the complementary nodes to a
+ * leaf. `leafidx' is 0 for the rightmost leaf node. This function
+ * will return an array with a length equal to the number of levels in
+ * the tree minus one (the root is not a complentary node). The 0th
+ * element of the returned array will be the index of the immediate
+ * sibling, while the 1st element will be the index of the
+ * complementary node one level above the leaf node, and so on. Note
+ * that logleaves = log2(nleaves). If `orders' is not NULL, the
+ * function will additionally allocate an array of `logleaves' *
+ * sizeof(int) with each element representing whether each
+ * complementary node is a left or right child. */
+int *merkle_complement(int leafidx, int logleaves, int **orders)
+{
+    int *comp = calloc(logleaves, sizeof(int));
+    if(orders)
+        *orders = calloc(logleaves, sizeof(int));
+
+    /* true index of leaf */
+    int idx = (1 << logleaves) - 1 + leafidx;
+
+    /* progress up the tree */
+    for(int i = 0; i < logleaves; ++i)
+    {
+        /* output index of sibling node */
+        comp[i] = idx + ((idx & 1) ? 1 : -1);
+
+        if(orders)
+            (*orders)[i] = ((idx&1) ? 1 : 0);
+
+        /* find parent index and loop */
+        idx = (idx - ((idx & 1) ? 1 : 2)) / 2;
+    }
+
+    return comp;
+}
+
+/* Shim to get only the orders */
+int *merkle_complement_orders(int leafidx, int logleaves)
+{
+    int *orders;
+    free(merkle_complement(leafidx, logleaves, &orders));
+    return orders;
+}
+
 /* convert the first 8 bytes (little endian) to a 64-bit int */
 uint64_t hash_to_u64(hash_t h)
 {
