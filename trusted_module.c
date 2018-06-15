@@ -111,7 +111,7 @@ const char *tm_geterror(void)
     return "success";
 }
 
-/* combine two NU certificates */
+/* combine two NU certificates, untested. */
 struct tm_cert tm_cert_combine(const struct trusted_module *tm,
                                const struct tm_cert *nu1, hash_t hmac1,
                                const struct tm_cert *nu2, hash_t hmac2,
@@ -457,7 +457,6 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
  * and signed in *vr_hmac. Additionally, the internal IOMT root will
  * be updated to reflect the incremented file counter.
  */
-
 struct tm_cert tm_request(struct trusted_module *tm,
                           const struct user_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
@@ -669,6 +668,8 @@ struct tm_cert tm_request(struct trusted_module *tm,
  * verify its integrity against kf=HMAC(secret, key=f_idx), and then
  * re-encrypt the secret with the module's secret key. This is the
  * F_rs() function described by Mohanty et al. */
+
+/* Untested. */
 hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t file_idx,
                                     uint64_t file_counter,
@@ -709,6 +710,8 @@ hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
  * ACL. The index given in rv2 will select the key used to encrypt the
  * secret. As with tm_verify_and_encrypt_secret(), kf=HMAC(secret,
  * key=f_idx). */
+
+/* Untested. */
 hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           const struct tm_cert *rv1, hash_t rv1_hmac,
                           const struct tm_cert *rv2, hash_t rv2_hmac,
@@ -758,7 +761,25 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
         return hash_null;
     }
 
-    /* TODO */
+    hash_t pad = hmac_sha256(kf.hash, sizeof(kf.hash),
+                             tm->secret, sizeof(tm->secret));
+
+    /* decrypt */
+    secret = hash_xor(secret, pad);
+
+    /* verify that kf=HMAC(secret, file_idx) */
+    if(!hash_equals(kf, hmac_sha256(secret.hash, sizeof(secret.hash),
+                                    &rv1->rv.idx, sizeof(rv1->rv.idx))))
+    {
+        tm_seterror("secret integrity not confirmed");
+        return hash_null;
+    }
+
+    /* now re-encrypt for conveyance to user by XOR'ing with HMAC(kf, user_key) */
+    pad = hmac_sha256(kf.hash, sizeof(kf.hash),
+                      tm->user_keys[rv2->rv.idx - 1].key,
+                      tm->user_keys[rv2->rv.idx - 1].len);
+    return hash_xor(secret, pad);
 }
 
 /* self-test */
