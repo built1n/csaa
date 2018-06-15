@@ -674,9 +674,9 @@ hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t file_idx,
                                     uint64_t file_counter,
                                     uint64_t user_id,
-                                    hash_t enc_secret, hash_t kf)
+                                    hash_t encrypted_secret, hash_t kf)
 {
-    hash_t pad; /* key = enc_secret ^ pad */
+    hash_t pad; /* key = encrypted_secret ^ pad */
     HMAC_CTX *ctx = HMAC_CTX_new();
     HMAC_Init_ex(ctx, tm->user_keys[user_id - 1].key, tm->user_keys[user_id - 1].len,
                  EVP_sha256(), NULL);
@@ -687,7 +687,7 @@ hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
     HMAC_Final(ctx, pad.hash, NULL);
     HMAC_CTX_free(ctx);
 
-    hash_t key = hash_xor(enc_secret, pad);
+    hash_t key = hash_xor(encrypted_secret, pad);
 
     if(hash_equals(kf,
                    hmac_sha256(key.hash, sizeof(key.hash),

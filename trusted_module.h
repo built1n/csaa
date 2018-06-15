@@ -55,7 +55,10 @@ struct user_request {
     uint64_t counter; /* current counter value, 0 for creation */
     hash_t val; /* for ACL update, val=[root of ACL IOMT], for file
                  * update, val is a commitment to the contents, key,
-                 * and index of the file */
+                 * and index of the file (specifically this is the
+                 * value represented by lambda in Mohanty et al.,
+                 * equal to HMAC(h(encrypted contents), kf). Note that
+                 * kf=HMAC(key, file_idx) */
     union {
         /* if counter = 0 and type = ACL_UPDATE, create a new file with given ACL */
         struct {
@@ -155,4 +158,29 @@ struct tm_cert tm_request(struct trusted_module *tm,
                           struct tm_cert *vr_out, hash_t *vr_hmac,
                           hash_t *ack_hmac);
 
+/* enc_secret is encrypted by the user by XOR'ing the file encryption
+ * key with h(f + c_f + K), where + denotes concatenation. The purpose
+ * of this function is to decrypt the secret passed by the user,
+ * verify its integrity against kf=HMAC(secret, key=f_idx), and then
+ * re-encrypt the secret with the module's secret key. This is the
+ * F_rs() function described by Mohanty et al. */
+/* Untested. */
+hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
+                                    uint64_t file_idx,
+                                    uint64_t file_counter,
+                                    uint64_t user_id,
+                                    hash_t encrypted_secret, hash_t kf);
+
+/* Decrypt a previously encrypted secret, and then encrypt for receipt
+ * by a user. rv1 should bind the file index and counter to the
+ * current root. rv2 should verify the user's access level in the
+ * ACL. The index (which is a user id) given in rv2 will select the
+ * key used to encrypt the secret. As with
+ * tm_verify_and_encrypt_secret(), kf=HMAC(secret, key=f_idx). */
+/* Untested. */
+hash_t tm_retrieve_secret(const struct trusted_module *tm,
+                          const struct tm_cert *rv1, hash_t rv1_hmac,
+                          const struct tm_cert *rv2, hash_t rv2_hmac,
+                          const struct tm_cert *fr, hash_t fr_hmac,
+                          hash_t secret, hash_t kf);
 #endif

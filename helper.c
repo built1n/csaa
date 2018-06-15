@@ -47,6 +47,9 @@ struct tm_cert cert_rv(const struct trusted_module *tm,
                                  b, nonexist, hmac_nonexist);
 }
 
+/* Fill out a user_request struct to create a file with the index
+ * given in file_node->idx with the user added with level 3 access in
+ * the ACL. */
 struct user_request req_filecreate(const struct trusted_module *tm,
                                    uint64_t user_id,
                                    const struct iomt_node *file_node,
@@ -81,6 +84,9 @@ struct user_request req_filecreate(const struct trusted_module *tm,
     return req;
 }
 
+/* Fill out a user_request struct to modify an existing file's
+ * contents, given the previously generated FR certificate, and the
+ * ACL node giving the user's access rights. */
 struct user_request req_filemodify(const struct trusted_module *tm,
                                    const struct tm_cert *fr_cert, hash_t fr_hmac,
                                    const struct iomt_node *file_node,
@@ -113,6 +119,44 @@ struct user_request req_filemodify(const struct trusted_module *tm,
                                  file_comp, file_orders, file_n,
                                  &req.modify.ru_hmac);
     req.val = fileval;
+
+    return req;
+}
+
+/* Fill out a user_request struct to modify a file's ACL. Same
+ * parameters as req_filemodify(), except the hash is the root of the
+ * new ACL. */
+struct user_request req_aclmodify(const struct trusted_module *tm,
+                                  const struct tm_cert *fr_cert, hash_t fr_hmac,
+                                  const struct iomt_node *file_node,
+                                  const hash_t *file_comp, const int *file_orders, size_t file_n,
+                                  const struct iomt_node *oldacl_node,
+                                  const hash_t *oldacl_comp, const int *oldacl_orders, size_t oldacl_n,
+                                  hash_t newacl_root)
+{
+    struct user_request req;
+    req.type = ACL_UPDATE;
+
+    req.idx = file_node->idx;
+    req.counter = hash_to_u64(file_node->val);
+
+    req.user_id = oldacl_node->idx;
+
+    req.modify.fr_cert = *fr_cert;
+    req.modify.fr_hmac = fr_hmac;
+
+    req.modify.rv_cert = cert_rv(tm,
+                                 oldacl_node,
+                                 oldacl_comp, oldacl_orders, oldacl_n,
+                                 &req.modify.rv_hmac,
+                                 0, NULL, NULL);
+
+    hash_t next_counter = u64_to_hash(req.counter + 1);
+
+    req.modify.ru_cert = cert_ru(tm, file_node, next_counter,
+                                 file_comp, file_orders, file_n,
+                                 &req.modify.ru_hmac);
+    req.val = newacl_root;
 
     return req;
 }

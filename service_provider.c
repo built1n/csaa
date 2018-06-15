@@ -12,12 +12,12 @@
 #include "trusted_module.h"
 
 struct file_version {
-    hash_t kf; /* h(key, file_idx) */
-    hash_t l; /* h(h(file contents), kf) */
-    hash_t enc_key; /* XOR'd with h(kf, module secret) */
+    hash_t kf; /* HMAC(key, file_idx) */
+    hash_t l; /* HMAC(h(encrypted contents), kf) */
+    hash_t encrypted_secret; /* XOR'd with HMAC(kf, module secret) */
 
-    struct tm_cert cert; /* VR certificate */
-    hash_t cert_hmac;
+    struct tm_cert vr_cert; /* VR certificate */
+    hash_t vr_hmac;
 
     void *contents;
     size_t len;
@@ -35,7 +35,7 @@ struct file_record {
     hash_t fr_hmac;
 
     struct file_version *versions;
-    int n_versions;
+    int nversions;
 };
 
 struct service_provider {
@@ -292,19 +292,39 @@ static struct file_record *lookup_record(struct service_provider *sp, int idx)
 
 /* We do not check to ensure that there are no duplicate file indices;
  * this is up to the caller */
-static void insert_record(struct service_provider *sp, struct file_record *rec)
+static void append_record(struct service_provider *sp, const struct file_record *rec)
 {
     sp->records = realloc(sp->records, sizeof(struct file_record) * ++sp->nrecords);
     sp->records[sp->nrecords - 1] = *rec;
 }
 
-/* this does the majority of the work that actually modifies or
- * creates a file */
+static void append_version(struct file_record *rec, const struct file_version *ver)
+{
+    rec->versions = realloc(rec->versions, sizeof(struct file_version) * ++rec->nversions);
+    rec->versions[rec->nversions - 1] = *ver;
+}
+
+/* This does the majority of the work that actually modifies or
+ * creates a file. It expects a filled and signed user_request
+ * structure, req, and will return the resulting FR certificate and
+ * its signature in *hmac_out. Additionally, the module's
+ * authenticated acknowledgement (equal to HMAC(req | 0), where |
+ * indicates concatenation) is output in *ack_hmac_out.
+ *
+ * If the request is to modify the file, the parameters
+ * encrypted_secret, kf, encrypted_contents, and contents_len are used
+ * (otherwise they are ignored). `encrypted_secret' should be the file
+ * encryption key XOR'd with HMAC(file index | file counter,
+ * user_key). kf should be HMAC(encryption secret, file index).
+ */
 struct tm_cert sp_request(struct service_provider *sp,
                           const struct user_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
                           struct tm_cert *vr_out, hash_t *vr_hmac_out,
-                          hash_t *ack_hmac_out)
+                          hash_t *ack_hmac_out,
+                          hash_t encrypted_secret, hash_t kf,
+                          const void *encrypted_contents,
+                          size_t contents_len)
 {
     struct tm_cert vr = cert_null;
     hash_t vr_hmac, ack_hmac, fr_hmac;
@@ -325,13 +345,51 @@ struct tm_cert sp_request(struct service_provider *sp,
             need_insert = true;
         }
 
-        rec->version = fr.fr.version;
         rec->counter = fr.fr.counter;
         rec->fr_cert = fr;
         rec->fr_hmac = fr_hmac;
 
+        if(rec->version != fr.fr.version)
+        {
+            rec->version = fr.fr.version;
+
+            struct file_version ver;
+            hash_t gamma = sha256(encrypted_contents, contents_len);
+            ver.l = hmac_sha256(&gamma, sizeof(gamma),
+                                &kf, sizeof(kf));
+
+            if(!is_zero(encrypted_secret) && !is_zero(kf))
+            {
+                /* File is encrypted */
+                ver.encrypted_secret = tm_verify_and_encrypt_secret(sp->tm,
+                                                                    rec->idx, rec->counter,
+                                                                    req->user_id,
+                                                                    encrypted_secret, kf);
+                assert(!is_zero(ver.encrypted_secret));
+
+                /* We have no way of verifying that kf=HMAC(encryption
+                 * secret, file index) ourselves; instead we rely on the
+                 * module to do so for us. */
+                ver.kf = kf;
+            }
+            else
+            {
+                ver.encrypted_secret = hash_null;
+            }
+
+            ver.vr_cert = vr;
+            ver.vr_hmac = vr_hmac;
+
+            append_version(rec, &ver);
+        }
+
         if(need_insert)
-            insert_record(sp, rec);
+        {
+            append_record(sp, rec);
+
+            /* append_record will make a copy */
+            free(rec);
+        }
 
         /* update our tree */
         sp->mt_leaves[req->idx - 1].val = u64_to_hash(fr.fr.counter);
@@ -371,7 +429,8 @@ void sp_test(void)
     hash_t fr_hmac;
     hash_t ack_hmac;
 
-    struct tm_cert fr_cert = sp_request(sp, &req, req_hmac, &fr_hmac, NULL, NULL, &ack_hmac);
+    struct tm_cert fr_cert = sp_request(sp, &req, req_hmac, &fr_hmac, NULL, NULL, &ack_hmac,
+                                        hash_null, hash_null, NULL, 0);
 
     check(fr_cert.type == FR &&
           fr_cert.fr.counter == 1 &&
@@ -394,7 +453,8 @@ void sp_test(void)
     struct tm_cert vr;
     hash_t vr_hmac;
 
-    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, &ack_hmac);
+    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, &ack_hmac,
+                                       hash_null, hash_null, "contents", 8);
     printf("File modification: ");
     check(new_fr.type == FR);
 
