@@ -87,10 +87,8 @@ struct iomt *iomt_new(int logleaves);
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
 void iomt_fill(struct iomt *tree);
 void iomt_dump(struct iomt *tree);
-struct iomt_node *lookup_leaf(struct iomt *tree, int idx);
+struct iomt_node *lookup_leaf(struct iomt *tree, uint64_t idx);
 void iomt_free(struct iomt *tree);
-
-struct iomt_node *lookup_leaf(struct iomt *tree, int idx);
 
 int bintree_parent(int idx);
 int bintree_sibling(int idx);

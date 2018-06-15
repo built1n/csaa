@@ -257,6 +257,11 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
 {
     if(!nu)
         return cert_null;
+    if(!cert_verify(tm, nu, hmac))
+    {
+        tm_seterror("improper certificate authentication");
+        return cert_null;
+    }
     if(!hash_equals(nu->nu.orig_node, nu->nu.new_node) || !hash_equals(nu->nu.orig_root, nu->nu.new_root))
         return cert_null;
 

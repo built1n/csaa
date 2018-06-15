@@ -264,7 +264,7 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
 }
 
 /* find a node with given idx */
-struct iomt_node *lookup_leaf(struct iomt *tree, int idx)
+struct iomt_node *lookup_leaf(struct iomt *tree, uint64_t idx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
         if(idx == tree->mt_leaves[i].idx)
@@ -319,7 +319,7 @@ void iomt_dump(struct iomt *tree)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
     {
-        printf("(%d, %s, %d)%s",
+        printf("(%lu, %s, %lu)%s",
                tree->mt_leaves[i].idx,
                hash_format(tree->mt_leaves[i].val, 4).str,
                tree->mt_leaves[i].next_idx,
