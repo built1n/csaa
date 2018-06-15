@@ -9,7 +9,7 @@
 #include "crypto.h"
 #include "trusted_module.h"
 
-struct tm_cert cert_ru(struct trusted_module *tm,
+struct tm_cert cert_ru(const struct trusted_module *tm,
                        const struct iomt_node *node, hash_t new_val,
                        const hash_t *comp, const int *orders, size_t n,
                        hash_t *hmac_out)
@@ -26,10 +26,12 @@ struct tm_cert cert_ru(struct trusted_module *tm,
     return tm_cert_record_update(tm, &nu, nu_hmac, node, new_val, hmac_out);
 }
 
-struct tm_cert cert_rv(struct trusted_module *tm,
+struct tm_cert cert_rv(const struct trusted_module *tm,
                        const struct iomt_node *node,
                        const hash_t *comp, const int *orders, size_t n,
-                       hash_t *hmac_out)
+                       hash_t *hmac_out,
+                       uint64_t b,
+                       struct tm_cert *nonexist, hash_t *hmac_nonexist)
 {
     hash_t nu_hmac;
     struct tm_cert nu = tm_cert_node_update(tm,
@@ -42,5 +44,75 @@ struct tm_cert cert_rv(struct trusted_module *tm,
                                  &nu, nu_hmac,
                                  node,
                                  hmac_out,
+                                 b, nonexist, hmac_nonexist);
+}
+
+struct user_request req_filecreate(const struct trusted_module *tm,
+                                   uint64_t user_id,
+                                   const struct iomt_node *file_node,
+                                   const hash_t *file_comp, const int *file_orders, size_t file_n)
+{
+    /* construct a request to create a file */
+    struct user_request req;
+    req.idx = file_node->idx;
+    req.user_id = user_id;
+    req.type = ACL_UPDATE;
+    req.counter = 0;
+
+    /* construct ACL with a single element (the user, with full access) */
+    struct iomt_node acl_node = (struct iomt_node) { 1, 1, u64_to_hash(3) };
+    req.val = merkle_compute(hash_node(&acl_node), NULL, NULL, 0);
+
+    hash_t one = u64_to_hash(1);
+
+    hash_t ru_hmac;
+
+    /* we need a RU certificate of the form [f, 0, root, 1, new root],
+     * which requires a NU certificate of the form [v, root, v', new
+     * root], where v=h(original IOMT node) and v'=h(new IOMT node) */
+    struct tm_cert ru = cert_ru(tm,
+                                file_node, one,
+                                file_comp, file_orders, file_n,
+                                &ru_hmac);
+
+    req.create.ru_cert = ru;
+    req.create.ru_hmac = ru_hmac;
+
+    return req;
+}
+
+struct user_request req_filemodify(const struct trusted_module *tm,
+                                   const struct tm_cert *fr_cert, hash_t fr_hmac,
+                                   const struct iomt_node *file_node,
+                                   const hash_t *file_comp, const int *file_orders, size_t file_n,
+                                   const struct iomt_node *acl_node,
+                                   const hash_t *acl_comp, const int *acl_orders, size_t acl_n,
+                                   hash_t fileval)
+{
+    /* modification */
+    struct user_request req;
+    req.type = FILE_UPDATE;
+
+    req.idx = file_node->idx;
+    req.counter = hash_to_u64(file_node->val);
+
+    req.user_id = acl_node->idx;
+
+    req.modify.fr_cert = *fr_cert;
+    req.modify.fr_hmac = fr_hmac;
+
+    req.modify.rv_cert = cert_rv(tm,
+                                 acl_node,
+                                 acl_comp, acl_orders, acl_n,
+                                 &req.modify.rv_hmac,
                                  0, NULL, NULL);
+
+    hash_t next_counter = u64_to_hash(req.counter + 1);
+
+    req.modify.ru_cert = cert_ru(tm, file_node, next_counter,
+                                 file_comp, file_orders, file_n,
+                                 &req.modify.ru_hmac);
+    req.val = fileval;
+
+    return req;
 }

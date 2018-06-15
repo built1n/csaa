@@ -34,6 +34,13 @@ struct trusted_module {
     unsigned char secret[32];
 };
 
+static void tm_setroot(struct trusted_module *tm, hash_t newroot)
+{
+    //printf("New root: ");
+    tm->root = newroot;
+    //dump_hash(tm->root);
+}
+
 struct trusted_module *tm_new(const void *key, size_t keylen)
 {
     struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
@@ -54,23 +61,27 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
 
     /* initialize with a node of (1, 0, 1) in the tree */
     struct iomt_node boot = (struct iomt_node) { 1, 1, hash_null };
-    tm->root = merkle_compute(hash_node(&boot), NULL, NULL, 0);
+
+    tm_setroot(tm, merkle_compute(hash_node(&boot), NULL, NULL, 0));
 
     return tm;
 }
 
-static hash_t cert_sign(struct trusted_module *tm, const struct tm_cert *cert)
+static hash_t cert_sign(const struct trusted_module *tm, const struct tm_cert *cert)
 {
     return hmac_sha256(cert, sizeof(*cert), tm->secret, sizeof(tm->secret));
 }
 
-static bool cert_verify(struct trusted_module *tm, const struct tm_cert *cert, hash_t hmac)
+static bool cert_verify(const struct trusted_module *tm, const struct tm_cert *cert, hash_t hmac)
 {
     hash_t calculated = cert_sign(tm, cert);
     return hash_equals(calculated, hmac);
 }
 
-struct tm_cert tm_cert_node_update(struct trusted_module *tm, hash_t orig, hash_t new, const hash_t *comp, const int *orders, size_t n, hash_t *hmac)
+struct tm_cert tm_cert_node_update(const struct trusted_module *tm,
+                                   hash_t orig, hash_t new,
+                                   const hash_t *comp, const int *orders, size_t n,
+                                   hash_t *hmac)
 {
     struct tm_cert cert;
     cert.type = NU;
@@ -101,7 +112,7 @@ const char *tm_geterror(void)
 }
 
 /* combine two NU certificates */
-struct tm_cert tm_cert_combine(struct trusted_module *tm,
+struct tm_cert tm_cert_combine(const struct trusted_module *tm,
                                const struct tm_cert *nu1, hash_t hmac1,
                                const struct tm_cert *nu2, hash_t hmac2,
                                hash_t *hmac_out)
@@ -150,11 +161,11 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
 /* this function will then issue a certificate verifying that y and
  * y'' are equivalent roots, indicating that they differ only in y''
  * having an additional placeholder node with index a */
-struct tm_cert tm_cert_equiv(struct trusted_module *tm,
+struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
                              const struct tm_cert *nu_encl, hash_t hmac_encl,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
                              const struct iomt_node *encloser,
-                             int a, hash_t *hmac_out)
+                             uint64_t a, hash_t *hmac_out)
 {
     if(!nu_encl || !nu_ins)
     {
@@ -230,11 +241,11 @@ struct tm_cert tm_cert_equiv(struct trusted_module *tm,
 /* also, if b > 0 and nonexist != NULL, this function will generate a
  * certificate indicating that no node with index b exists with root
  * y*/
-struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
+struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
                                      const struct iomt_node *node,
                                      hash_t *hmac_out,
-                                     int b,
+                                     uint64_t b,
                                      struct tm_cert *nonexist,
                                      hash_t *hmac_nonexist)
 {
@@ -281,7 +292,7 @@ struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
     return cert;
 }
 
-struct tm_cert tm_cert_record_update(struct trusted_module *tm,
+struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t nu_hmac,
                                      const struct iomt_node *node,
                                      hash_t new_val,
@@ -342,21 +353,15 @@ bool tm_set_equiv_root(struct trusted_module *tm,
     if(!cert_verify(tm, cert_eq, hmac))
         return false;
 
-    printf("Current root: ");
-    dump_hash(tm->root);
-    printf("New root: ");
-
     if(hash_equals(tm->root, cert_eq->eq.orig_root))
     {
-        tm->root = cert_eq->eq.new_root;
-        dump_hash(tm->root);
+        tm_setroot(tm, cert_eq->eq.new_root);
         return true;
     }
 
     if(hash_equals(tm->root, cert_eq->eq.new_root))
     {
-        tm->root = cert_eq->eq.orig_root;
-        dump_hash(tm->root);
+        tm_setroot(tm, cert_eq->eq.orig_root);
         return true;
     }
 
@@ -364,13 +369,13 @@ bool tm_set_equiv_root(struct trusted_module *tm,
 }
 
 /* user id is 1-indexed */
-hash_t req_sign(struct trusted_module *tm, const struct user_request *req, int id)
+hash_t req_sign(const struct trusted_module *tm, const struct user_request *req, int id)
 {
     return hmac_sha256(req, sizeof(*req), tm->user_keys[id - 1].key, tm->user_keys[id - 1].len);
 }
 
 /* verify HMAC of user request */
-static bool req_verify(struct trusted_module *tm, const struct user_request *req, int id, hash_t hmac)
+static bool req_verify(const struct trusted_module *tm, const struct user_request *req, uint64_t id, hash_t hmac)
 {
     if(id < 1 || id >= tm->n_users + 1)
         return false;
@@ -460,7 +465,10 @@ struct tm_cert tm_request(struct trusted_module *tm,
                           hash_t *hmac_ack)
 {
     if(!req)
+    {
+        tm_seterror("null request");
         return cert_null;
+    }
     if(!req_verify(tm, req, req->user_id, req_hmac))
     {
         tm_seterror("improper authentication");
@@ -469,7 +477,10 @@ struct tm_cert tm_request(struct trusted_module *tm,
 
     /* invalid request type */
     if(req->type != ACL_UPDATE && req->type != FILE_UPDATE)
+    {
+        tm_seterror("invalid request type");
         return cert_null;
+    }
 
     /* file creation */
     if(req->type == ACL_UPDATE && req->counter == 0)
@@ -481,9 +492,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
          * TM) to a different root */
 
         /* we treat the hash like a 256-bit little-endian counter */
-        hash_t one;
-        memset(&one, 0, sizeof(one));
-        one.hash[0] = 1;
+        hash_t one = u64_to_hash(1);
 
         /* first check the validity of the certificate */
         if(!cert_verify(tm, &req->create.ru_cert, req->create.ru_hmac))
@@ -514,7 +523,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         }
 
         /* update the IOMT root */
-        tm->root = req->create.ru_cert.ru.new_root;
+        tm_setroot(tm, req->create.ru_cert.ru.new_root);
 
         /* issue an FR certificate */
         struct tm_cert cert;
@@ -533,18 +542,33 @@ struct tm_cert tm_request(struct trusted_module *tm,
      * new file version. In either case, check the three certificates
      * (to verify ACL and access privilege). */
     if(req->counter <= 0)
+    {
+        tm_seterror("invalid counter");
         return cert_null;
+    }
     if(!cert_verify(tm, &req->modify.fr_cert, req->modify.fr_hmac))
+    {
+        tm_seterror("FR certificate improperly authenticated");
         return cert_null;
+    }
     if(!cert_verify(tm, &req->modify.rv_cert, req->modify.rv_hmac))
+    {
+        tm_seterror("RV certificate improperly authenticated");
         return cert_null;
+    }
     if(!cert_verify(tm, &req->modify.ru_cert, req->modify.ru_hmac))
+    {
+        tm_seterror("RU certificate improperly authenticated");
         return cert_null;
+    }
 
     /* check that FR and RU certificate indices match request index */
     if(req->modify.fr_cert.fr.idx != req->idx ||
        req->modify.ru_cert.ru.idx != req->idx)
+    {
+        tm_seterror("either FR or RU certificate indices do not match request index");
         return cert_null;
+    }
 
     /* Check that the file counter is consistent with the stored root
      * and the counter in the request. Also check that the FR
@@ -552,27 +576,42 @@ struct tm_cert tm_request(struct trusted_module *tm,
     if(!hash_equals(req->modify.ru_cert.ru.orig_root, tm->root) ||
        hash_to_u64(req->modify.ru_cert.ru.orig_val) != req->counter ||
        req->modify.fr_cert.fr.counter != req->counter)
+    {
+        tm_seterror("RU certificate does not correspond to stored root; or FR counter does not match request counter");
         return cert_null;
+    }
 
     /* check that the RU certificate corresponds to an increment of
      * the counter value. */
     if(hash_to_u64(req->modify.ru_cert.ru.orig_val) + 1 != hash_to_u64(req->modify.ru_cert.ru.new_val))
+    {
+        tm_seterror("RU does not reflect incrementing counter value");
         return cert_null;
+    }
 
     /* check access level using RV cert, which verifies a record in
      * the ACL tree. */
     if(!hash_equals(req->modify.fr_cert.fr.acl, req->modify.rv_cert.rv.root))
+    {
+        tm_seterror("RV certificate does not match ACL given in file record");
         return cert_null;
+    }
     if(req->modify.rv_cert.rv.idx != req->user_id)
+    {
+        tm_seterror("RV certificate has wrong user id");
         return cert_null;
+    }
 
     /* we treat the first 8 bytes of the counter as a little-endian
      * integer counter */
-    int access = hash_to_u64(req->modify.rv_cert.rv.val);
+    uint64_t access = hash_to_u64(req->modify.rv_cert.rv.val);
 
     /* no write access to file or ACL */
     if(access < 2)
+    {
+        tm_seterror("user has insufficient permissions");
         return cert_null;
+    }
 
     /* file update */
     if(req->type == FILE_UPDATE)
@@ -597,7 +636,8 @@ struct tm_cert tm_request(struct trusted_module *tm,
         *vr_hmac = cert_sign(tm, &vr_cert);
         *vr_out = vr_cert;
 
-        tm->root = req->modify.ru_cert.ru.new_root;
+        tm_setroot(tm, req->modify.ru_cert.ru.new_root);
+
         *hmac_ack = req_ack(tm, req);
 
         return fr_cert;
@@ -614,7 +654,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
 
         *hmac_out = cert_sign(tm, &cert);
 
-        tm->root = req->modify.ru_cert.ru.new_root;
+        tm_setroot(tm, req->modify.ru_cert.ru.new_root);
         *hmac_ack = req_ack(tm, req);
         return cert;
     }
@@ -629,7 +669,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
  * verify its integrity against kf=HMAC(secret, key=f_idx), and then
  * re-encrypt the secret with the module's secret key. This is the
  * F_rs() function described by Mohanty et al. */
-hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
+hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t file_idx,
                                     uint64_t file_counter,
                                     uint64_t user_id,
@@ -661,6 +701,64 @@ hash_t tm_verify_and_encrypt_secret(struct trusted_module *tm,
 
     /* failure */
     return hash_null;
+}
+
+/* Decrypt a previously encrypted secret, and then encrypt for receipt
+ * by a user. rv1 should bind the file index and counter to the
+ * current root. rv2 should verify the user's access level in the
+ * ACL. The index given in rv2 will select the key used to encrypt the
+ * secret. As with tm_verify_and_encrypt_secret(), kf=HMAC(secret,
+ * key=f_idx). */
+hash_t tm_retrieve_secret(const struct trusted_module *tm,
+                          const struct tm_cert *rv1, hash_t rv1_hmac,
+                          const struct tm_cert *rv2, hash_t rv2_hmac,
+                          const struct tm_cert *fr, hash_t fr_hmac,
+                          hash_t secret, hash_t kf)
+{
+    if(!rv1 || !rv2 || !fr)
+    {
+        tm_seterror("null certificate");
+        return hash_null;
+    }
+
+    if(!cert_verify(tm, rv1, rv1_hmac) ||
+       !cert_verify(tm, rv2, rv2_hmac) ||
+       !cert_verify(tm, fr, fr_hmac))
+    {
+        tm_seterror("certificate not authenticated");
+        return hash_null;
+    }
+
+    if(rv1->type != RV ||
+       rv2->type != RV ||
+       fr->type != FR)
+    {
+        tm_seterror("wrong certificate type");
+        return hash_null;
+    }
+
+    if(rv1->rv.idx != fr->fr.idx)
+    {
+        tm_seterror("RV1 index does not match file index");
+        return hash_null;
+    }
+    if(hash_to_u64(rv1->rv.val) != fr->fr.counter)
+    {
+        tm_seterror("counter given by RV1 does not match counter in FR");
+        return hash_null;
+    }
+    if(!hash_equals(rv1->rv.root, tm->root))
+    {
+        tm_seterror("RV1 root does not match internal root");
+        return hash_null;
+    }
+    if(!hash_equals(rv2->rv.root, fr->fr.acl))
+    {
+        tm_seterror("RV2 root does not match ACL root");
+        return hash_null;
+    }
+
+    /* TODO */
 }
 
 /* self-test */

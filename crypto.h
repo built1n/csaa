@@ -13,14 +13,14 @@ typedef struct hash_t {
 } hash_t;
 
 struct iomt_node {
-    int idx, next_idx; /* idx cannot be zero */
+    uint64_t idx, next_idx; /* idx cannot be zero */
     hash_t val; /* all zero indicates placeholder */
 };
 
 /* guaranteed to be zero */
 static const struct hash_t hash_null = { { 0 } };
 
-bool encloses(int b, int bprime, int a);
+bool encloses(uint64_t b, uint64_t bprime, uint64_t a);
 bool hash_equals(hash_t a, hash_t b);
 bool is_zero(hash_t u);
 
@@ -46,7 +46,7 @@ hash_t merkle_parent(hash_t u, hash_t v, int order);
  * sizeof(int) with each element representing whether each
  * complementary node is a left or right child. */
 int *merkle_complement(int leafidx, int logleaves, int **orders);
-int *merkle_complement_orders(int leafidx, int logleaves);
+int *merkle_complement_ordersonly(int leafidx, int logleaves);
 
 /* Return an array of indices of tree nodes that are dependent on a
  * given leaf node. Will be ordered from nearest relative to root. */
@@ -56,6 +56,7 @@ int bintree_parent(int idx);
 int bintree_sibling(int idx);
 
 uint64_t hash_to_u64(hash_t h);
+hash_t u64_to_hash(uint64_t n);
 void dump_hash(hash_t u);
 
 #endif

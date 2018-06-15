@@ -25,34 +25,34 @@ struct tm_cert {
             /* proof that there is a node with given idx,val that is a
              * child of root; if val=0, proof that there is no such
              * node */
-            hash_t root;
-            int idx;
+            uint64_t idx;
             hash_t val;
+            hash_t root;
         } rv; /* record verify */
         struct {
-            int idx;
+            uint64_t idx;
             hash_t orig_val, new_val;
             hash_t orig_root, new_root;
         } ru; /* record update */
         struct {
-            int idx;
-            int counter;
-            int version;
+            uint64_t idx;
+            uint64_t counter;
+            uint64_t version;
             hash_t acl; /* root of ACL IOMT */
         } fr; /* file record */
         struct {
-            int idx;
-            int version;
+            uint64_t idx;
+            uint64_t version;
             hash_t hash; /* commitment to contents, key, and index */
         } vr; /* version record (of a file) */
     };
 };
 
 struct user_request {
-    int idx;
-    int user_id; /* user id */
+    uint64_t idx; /* file index */
+    uint64_t user_id; /* user id */
     enum { ACL_UPDATE, FILE_UPDATE } type;
-    int counter;
+    uint64_t counter; /* current counter value, 0 for creation */
     hash_t val; /* for ACL update, val=[root of ACL IOMT], for file
                  * update, val is a commitment to the contents, key,
                  * and index of the file */
@@ -96,7 +96,7 @@ void tm_test(void);
  * NULL). Passing the [return, orig, new, orig_root, new_root] to the
  * module in the future will serve to verify this check. */
 /* complementary nodes and order are passed as usual */
-struct tm_cert tm_cert_node_update(struct trusted_module *tm,
+struct tm_cert tm_cert_node_update(const struct trusted_module *tm,
                                    hash_t orig, hash_t new,
                                    const hash_t *comp, const int *orders, size_t n,
                                    hash_t *hmac);
@@ -105,7 +105,7 @@ struct tm_cert tm_cert_node_update(struct trusted_module *tm,
  * child of y], and one stating [b is child of y]->[c is child of z],
  * and generate a certificate stating [a is child of x]->[c is child
  * of z] */
-struct tm_cert tm_cert_combine(struct trusted_module *tm,
+struct tm_cert tm_cert_combine(const struct trusted_module *tm,
                                const struct tm_cert *nu1, hash_t hmac1,
                                const struct tm_cert *nu2, hash_t hmac2,
                                hash_t *hmac_out);
@@ -118,25 +118,25 @@ struct tm_cert tm_cert_combine(struct trusted_module *tm,
 /* this function will then issue a certificate verifying that y and
  * y'' are equivalent roots, indicating that they differ only in y''
  * having an additional placeholder node with index a */
-struct tm_cert tm_cert_equiv(struct trusted_module *tm,
+struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
                              const struct tm_cert *nu_encl, hash_t hmac_encl,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
                              const struct iomt_node *encloser,
-                             int a, hash_t *hmac_out);
+                             uint64_t a, hash_t *hmac_out);
 
 /* nu must be of the form [x,y,x,y] to indicate that x is a child of y */
 /* also, if b > 0 and nonexist != NULL, this function will generate a
  * certificate indicating that no node with index b exists with root
  * y*/
-struct tm_cert tm_cert_record_verify(struct trusted_module *tm,
+struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
                                      const struct iomt_node *node,
                                      hash_t *hmac_out,
-                                     int b,
+                                     uint64_t b,
                                      struct tm_cert *nonexist,
                                      hash_t *hmac_nonexist);
 
-struct tm_cert tm_cert_record_update(struct trusted_module *tm,
+struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t nu_hmac,
                                      const struct iomt_node *node,
                                      hash_t new_val,

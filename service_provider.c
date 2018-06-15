@@ -24,9 +24,9 @@ struct file_version {
 };
 
 struct file_record {
-    int idx;
-    int version;
-    int counter;
+    uint64_t idx;
+    uint64_t version;
+    uint64_t counter;
 
     struct iomt_node *acl_leaves;
     int acl_nleaves;
@@ -93,13 +93,13 @@ static void restore_nodes(hash_t *nodes, const int *indices, const hash_t *value
  * value. Optionally, if old_dep is not NULL, *old_dep will be made to
  * point to an array of length mt_logleaves that contains the old node
  * values (whose indices are returned by merkle_dependents()). Untested. */
-static void update_tree(struct service_provider *sp, int leafidx, hash_t newval,
+static void update_tree(struct service_provider *sp, uint64_t leafidx, hash_t newval,
                         hash_t **old_dep)
 {
     if(old_dep)
         *old_dep = calloc(sp->mt_logleaves, sizeof(hash_t));
 
-    int idx = (1 << sp->mt_logleaves) - 1 + leafidx;
+    uint64_t idx = (1 << sp->mt_logleaves) - 1 + leafidx;
 
     sp->mt_nodes[idx] = newval;
     for(int i = 0; i < sp->mt_logleaves; ++i)
@@ -132,8 +132,8 @@ static void update_tree(struct service_provider *sp, int leafidx, hash_t newval,
  * counting from the leftmost leaf. */
 struct tm_cert cert_eq(struct service_provider *sp,
                        const struct iomt_node *encloser,
-                       int encloser_leafidx,
-                       int placeholder_leafidx, int placeholder_nodeidx,
+                       uint64_t encloser_leafidx,
+                       uint64_t placeholder_leafidx, uint64_t placeholder_nodeidx,
                        hash_t *hmac_out)
 {
     assert(encloses(encloser->idx, encloser->next_idx, placeholder_nodeidx));
@@ -191,17 +191,17 @@ static void fill_tree(struct service_provider *sp)
 {
     for(int i = 0; i < sp->mt_leafcount; ++i)
     {
-        int mt_idx = (1 << sp->mt_logleaves) - 1 + i;
+        uint64_t mt_idx = (1 << sp->mt_logleaves) - 1 + i;
         sp->mt_nodes[mt_idx] = hash_node(sp->mt_leaves + i);
     }
     /* now loop up from the bottom level, calculating the parent of
      * each pair of nodes */
     for(int i = sp->mt_logleaves - 1; i >= 0; --i)
     {
-        int baseidx = (1 << i) - 1;
+        uint64_t baseidx = (1 << i) - 1;
         for(int j = 0; j < (1 << i); ++j)
         {
-            int mt_idx = baseidx + j;
+            uint64_t mt_idx = baseidx + j;
             sp->mt_nodes[mt_idx] = merkle_parent(sp->mt_nodes[2 * mt_idx + 1],
                                                  sp->mt_nodes[2 * mt_idx + 2],
                                                  0);
@@ -289,9 +289,13 @@ static struct file_record *lookup_record(struct service_provider *sp, int idx)
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
  * avoid copying (O(n) lookup, O(1) insertion)? Probably better to use a hash
  * table. */
+
+/* We do not check to ensure that there are no duplicate file indices;
+ * this is up to the caller */
 static void insert_record(struct service_provider *sp, struct file_record *rec)
 {
-    /* TODO */
+    sp->records = realloc(sp->records, sizeof(struct file_record) * ++sp->nrecords);
+    sp->records[sp->nrecords - 1] = *rec;
 }
 
 /* this does the majority of the work that actually modifies or
@@ -330,7 +334,7 @@ struct tm_cert sp_request(struct service_provider *sp,
             insert_record(sp, rec);
 
         /* update our tree */
-        /* TODO */
+        sp->mt_leaves[req->idx - 1].val = u64_to_hash(fr.fr.counter);
     }
 
     /* return values to caller */
@@ -349,87 +353,41 @@ struct tm_cert sp_request(struct service_provider *sp,
 void sp_test(void)
 {
     /* 2^10 = 1024 leaves ought to be enough for anybody */
-    int logleaves = 2;
+    int logleaves = 4;
     struct service_provider *sp = sp_new("a", 1, logleaves);
 
     /* construct a request to create a file */
-    struct user_request req;
-    req.idx = 1;
-    req.user_id = 1;
-    req.type = ACL_UPDATE;
-    req.counter = 0;
+    printf("File creation: ");
+    int *file_compidx, *file_orders;
+    file_compidx = merkle_complement(0, sp->mt_logleaves, &file_orders);
 
-    struct iomt_node acl_node;
-    acl_node.idx = 1;
-    memset(&acl_node.val, 0, sizeof(acl_node.val));
-    acl_node.val.hash[0] = 3; /* full access */
-    acl_node.next_idx = 1;
-    req.val = merkle_compute(hash_node(&acl_node), NULL, NULL, 0);
+    hash_t *file_comp = lookup_nodes(sp->mt_nodes, file_compidx, sp->mt_logleaves);
 
-    struct iomt_node node;
-    node.idx = 1;
-    memset(node.val.hash, 0, 32);
-    node.next_idx = 1;
+    struct user_request req = req_filecreate(sp->tm, 1,
+                                             sp->mt_leaves + 0,
+                                             file_comp, file_orders, sp->mt_logleaves);
 
-    hash_t one;
-    memset(one.hash, 0, 32);
-    one.hash[0] = 1;
-
-    hash_t ru_hmac;
-
-    /* we need a RU certificate of the form [f, 0, root, 1, new root],
-     * which requires a NU certificate of the form [v, root, v', new
-     * root], where v=h(original IOMT node) and v'=h(new IOMT node) */
-    struct tm_cert ru = cert_ru(sp->tm, &node, one,
-                                NULL, NULL, 0,
-                                &ru_hmac,
-                                0, NULL, NULL);
-    printf("RU generation: ");
-    check(ru.type == RU &&
-          ru.ru.idx == 1 &&
-          hash_equals(ru.ru.orig_val, node.val) &&
-          hash_equals(ru.ru.new_val, one));
-
-    /* now create a request */
-    req.create.ru_cert = ru;
-    req.create.ru_hmac = ru_hmac;
     hash_t req_hmac = hmac_sha256(&req, sizeof(req), "a", 1);
     hash_t fr_hmac;
     hash_t ack_hmac;
 
     struct tm_cert fr_cert = sp_request(sp, &req, req_hmac, &fr_hmac, NULL, NULL, &ack_hmac);
 
-    printf("File creation: ");
     check(fr_cert.type == FR &&
           fr_cert.fr.counter == 1 &&
           fr_cert.fr.version == 0);
 
+    struct iomt_node acl_node = (struct iomt_node) { 1, 1, u64_to_hash(3) };
+
+    //sp->mt_leaves[0].val = u64_to_hash(1);
     /* modification */
-    struct user_request mod;
-    mod.type = FILE_UPDATE;
-    mod.idx = 1;
-    mod.user_id = 1;
-    mod.counter = 1;
-    mod.modify.fr_cert = fr_cert;
-    mod.modify.fr_hmac = fr_hmac;
-
-    mod.modify.rv_cert = cert_rv(sp->tm,
-                                 &acl_node,
-                                 NULL, NULL, 0,
-                                 &mod.modify.rv_hmac);
-
-    struct iomt_node node2;
-    node2.idx = 1;
-    node2.val = one;
-    node2.next_idx = 1;
-
-    hash_t two;
-    memset(&two, 0, sizeof(two));
-    two.hash[0] = 2;
-    mod.modify.ru_cert = cert_ru(sp->tm, &node2, two,
-                                NULL, NULL, 0,
-                                &mod.modify.ru_hmac,
-                                0, NULL, NULL);
+    struct user_request mod = req_filemodify(sp->tm,
+                                             &fr_cert, fr_hmac,
+                                             sp->mt_leaves + 0,
+                                             file_comp, file_orders, sp->mt_logleaves,
+                                             &acl_node,
+                                             NULL, NULL, 0,
+                                             hash_null);
 
     req_hmac = hmac_sha256(&mod, sizeof(mod), "a", 1);
 

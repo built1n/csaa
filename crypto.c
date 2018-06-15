@@ -6,7 +6,7 @@
 #include <openssl/sha.h>
 
 /* return true iff [b, bprime] encloses a */
-bool encloses(int b, int bprime, int a)
+bool encloses(uint64_t b, uint64_t bprime, uint64_t a)
 {
     return (b < a && a < bprime) || (bprime <= b && b < a) || (a < bprime && bprime <= b);
 }
@@ -177,7 +177,7 @@ int *merkle_dependents(int leafidx, int logleaves)
 }
 
 /* Shim to get only the orders */
-int *merkle_complement_orders(int leafidx, int logleaves)
+int *merkle_complement_ordersonly(int leafidx, int logleaves)
 {
     int *orders;
     free(merkle_complement(leafidx, logleaves, &orders));
@@ -190,5 +190,16 @@ uint64_t hash_to_u64(hash_t h)
     uint64_t ret = 0;
     for(int i = 0; i < 8; ++i)
         ret |= h.hash[i] << (i * 8);
+    return ret;
+}
+
+hash_t u64_to_hash(uint64_t n)
+{
+    hash_t ret = hash_null;
+    for(int i = 0; i < 8; ++i)
+    {
+        ret.hash[i] = n & 0xff;
+        n >>= 8;
+    }
     return ret;
 }
