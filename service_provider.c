@@ -46,78 +46,8 @@ struct service_provider {
     struct file_record *records;
     size_t nrecords;
 
-    struct iomt_node *mt_leaves; /* leaves of CDI-IOMT, value is counter */
-    int mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
-
-    /* Each level of the IOMT is stored sequentially from left to
-     * right, top to bottom, as follows:
-     *
-     *  [0]: root
-     *  [1]: root left child
-     *  [2]: root right child
-     *  [3]: left child of [1]
-     *  [4]: right child of [1]
-     *  [5]: left child of [2]
-     *  [6]: right child of [2],
-     *
-     * and so on.
-     */
-    hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note
-                       * that the bottom level consists of hashes of
-                       * the leaf nodes. */
+    struct iomt *iomt;
 };
-
-/* A bit of a hack: our complement calculation returns the *indices*
- * complementary nodes, which is good because the indices are much
- * smaller than the actual nodes (which are 32 bytes each with
- * SHA-256). However, the trusted module requires an array of the
- * actual hash values of the complementary nodes. It would be optimal
- * to modify each function to take the array of all nodes in the tree
- * in addition to the complement indices, but this function will serve
- * as a shim in the meantime. */
-static hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n)
-{
-    hash_t *ret = calloc(n, sizeof(hash_t));
-    for(int i = 0; i < n; ++i)
-        ret[i] = nodes[indices[i]];
-    return ret;
-}
-
-static void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n)
-{
-    for(int i = 0; i < n; ++i)
-        nodes[indices[i]] = values[i];
-}
-
-/* Update mt_nodes to reflect a change to a leaf node's
- * value. Optionally, if old_dep is not NULL, *old_dep will be made to
- * point to an array of length mt_logleaves that contains the old node
- * values (whose indices are returned by merkle_dependents()). Untested. */
-static void update_tree(struct service_provider *sp, uint64_t leafidx, hash_t newval,
-                        hash_t **old_dep)
-{
-    if(old_dep)
-        *old_dep = calloc(sp->mt_logleaves, sizeof(hash_t));
-
-    uint64_t idx = (1 << sp->mt_logleaves) - 1 + leafidx;
-
-    sp->mt_nodes[idx] = newval;
-    for(int i = 0; i < sp->mt_logleaves; ++i)
-    {
-        /* find the merkle parent of the two children first */
-        hash_t parent = merkle_parent(sp->mt_nodes[idx],
-                                      sp->mt_nodes[bintree_sibling(idx)],
-                                      (idx + 1) & 1);
-
-        idx = bintree_parent(idx);
-
-        /* save old value */
-        if(old_dep)
-            (*old_dep)[i] = sp->mt_nodes[idx];
-
-        sp->mt_nodes[idx] = parent;
-    }
-}
 
 /* Generate an EQ certificate for inserting a placeholder with index
  * placeholder_idx, given an encloser (which must actually enclose
@@ -152,61 +82,35 @@ struct tm_cert cert_eq(struct service_provider *sp,
     hash_t h_ins = hash_node(&insert);
 
     int *orders_enc, *orders_ins;
-    int *compidx_enc = merkle_complement(encloser_leafidx, sp->mt_logleaves, &orders_enc);
-    int *compidx_ins = merkle_complement(placeholder_leafidx, sp->mt_logleaves, &orders_ins);
+    int *compidx_enc = merkle_complement(encloser_leafidx, sp->iomt->mt_logleaves, &orders_enc);
+    int *compidx_ins = merkle_complement(placeholder_leafidx, sp->iomt->mt_logleaves, &orders_ins);
 
-    hash_t *comp_enc = lookup_nodes(sp->mt_nodes, compidx_enc, sp->mt_logleaves);
+    hash_t *comp_enc = lookup_nodes(sp->iomt->mt_nodes, compidx_enc, sp->iomt->mt_logleaves);
 
     /* we need two NU certificates */
     hash_t nu1_hmac, nu2_hmac;
 
     struct tm_cert nu1 = tm_cert_node_update(sp->tm,
                                              h_enc, h_encmod,
-                                             comp_enc, orders_enc, sp->mt_logleaves,
+                                             comp_enc, orders_enc, sp->iomt->mt_logleaves,
                                              &nu1_hmac);
 
     /* We now update the ancestors of the encloser node. */
     hash_t *old_depvalues;
-    update_tree(sp, encloser_leafidx, h_encmod, &old_depvalues);
+    merkle_update(sp->iomt, encloser_leafidx, h_encmod, &old_depvalues);
 
-    hash_t *comp_ins = lookup_nodes(sp->mt_nodes, compidx_ins, sp->mt_logleaves);
+    hash_t *comp_ins = lookup_nodes(sp->iomt->mt_nodes, compidx_ins, sp->iomt->mt_logleaves);
 
     struct tm_cert nu2 = tm_cert_node_update(sp->tm,
                                              hash_null, h_ins,
-                                             comp_ins, orders_ins, sp->mt_logleaves,
+                                             comp_ins, orders_ins, sp->iomt->mt_logleaves,
                                              &nu2_hmac);
 
     /* restore the tree */
-    int *dep_indices = merkle_dependents(encloser_leafidx, sp->mt_logleaves);
-    restore_nodes(sp->mt_nodes,  dep_indices, old_depvalues, sp->mt_logleaves);
+    int *dep_indices = merkle_dependents(encloser_leafidx, sp->iomt->mt_logleaves);
+    restore_nodes(sp->iomt->mt_nodes,  dep_indices, old_depvalues, sp->iomt->mt_logleaves);
 
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
-}
-
-/* Calculate the value of all the nodes of the tree, given the IOMT
- * leaves in mt_leaves. Leaf count *must* be an integer power of two,
- * otherwise bad things will happen. This function should only need to
- * be called once, namely when the service provider is created. */
-static void fill_tree(struct service_provider *sp)
-{
-    for(int i = 0; i < sp->mt_leafcount; ++i)
-    {
-        uint64_t mt_idx = (1 << sp->mt_logleaves) - 1 + i;
-        sp->mt_nodes[mt_idx] = hash_node(sp->mt_leaves + i);
-    }
-    /* now loop up from the bottom level, calculating the parent of
-     * each pair of nodes */
-    for(int i = sp->mt_logleaves - 1; i >= 0; --i)
-    {
-        uint64_t baseidx = (1 << i) - 1;
-        for(int j = 0; j < (1 << i); ++j)
-        {
-            uint64_t mt_idx = baseidx + j;
-            sp->mt_nodes[mt_idx] = merkle_parent(sp->mt_nodes[2 * mt_idx + 1],
-                                                 sp->mt_nodes[2 * mt_idx + 2],
-                                                 0);
-        }
-    }
 }
 
 /* in trusted_module.c */
@@ -220,54 +124,38 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 
     sp->tm = tm_new(key, keylen);
 
-    sp->mt_leafcount = 1 << logleaves;
-    sp->mt_logleaves = logleaves;
-    sp->mt_leaves = calloc(sp->mt_leafcount, sizeof(struct iomt_node));
-
-    sp->mt_nodes = calloc(2 * sp->mt_leafcount - 1, sizeof(hash_t));
+    sp->iomt = iomt_new(logleaves);
 
     /* The trusted module initializes itself with a single placeholder
      * node (1,0,1). We first update our list of IOMT leaves. Then we
      * insert our desired number of nodes by using EQ certificates to
      * update the internal IOMT root. Note that leaf indices are
      * 1-indexed. */
-    sp->mt_leaves[0] = (struct iomt_node) { 1, 1, hash_null };
-    update_tree(sp, 0, hash_node(sp->mt_leaves + 0), NULL);
+    sp->iomt->mt_leaves[0] = (struct iomt_node) { 1, 1, hash_null };
+    merkle_update(sp->iomt, 0, hash_node(sp->iomt->mt_leaves + 0), NULL);
 
-    for(int i = 1; i < sp->mt_leafcount; ++i)
+    for(int i = 1; i < sp->iomt->mt_leafcount; ++i)
     {
         /* generate EQ certificate */
         hash_t hmac;
-        struct tm_cert eq = cert_eq(sp, sp->mt_leaves + i - 1,
+        struct tm_cert eq = cert_eq(sp, sp->iomt->mt_leaves + i - 1,
                                     i - 1,
                                     i, i + 1,
                                     &hmac);
         assert(eq.type == EQ);
 
         /* update previous leaf's index */
-        sp->mt_leaves[i - 1].next_idx = i + 1;
-        update_tree(sp, i - 1, hash_node(sp->mt_leaves + i - 1), NULL);
+        sp->iomt->mt_leaves[i - 1].next_idx = i + 1;
+        merkle_update(sp->iomt, i - 1, hash_node(sp->iomt->mt_leaves + i - 1), NULL);
 
-        sp->mt_leaves[i] = (struct iomt_node) { i + 1, 1, hash_null };
-        update_tree(sp, i, hash_node(sp->mt_leaves + i), NULL);
+        /* next_idx is set to 1 to keep everything circularly linked;
+         * in the next iteration it will be updated to point to the
+         * next node, if any */
+        sp->iomt->mt_leaves[i] = (struct iomt_node) { i + 1, 1, hash_null };
+        merkle_update(sp->iomt, i, hash_node(sp->iomt->mt_leaves + i), NULL);
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
     }
-
-    /* loop around */
-#if 0
-    hash_t hmac;
-    struct tm_cert eq = cert_eq(sp, sp->mt_leaves + sp->mt_leafcount - 2,
-                                sp->mt_leafcount - 2,
-                                sp->mt_leafcount - 1, sp->mt_leafcount,
-                                &hmac);
-    assert(eq.type == EQ);
-
-    tm_set_equiv_root(sp->tm, &eq, hmac);
-
-    sp->mt_leaves[sp->mt_leafcount - 1] = (struct iomt_node) { sp->mt_leafcount, 1, hash_null };
-    update_tree(sp, sp->mt_leafcount - 1, hash_node(sp->mt_leaves + sp->mt_leafcount - 1), NULL);
-#endif
 
     /* We shouldn't need this; the incremental update_tree() calls
      * should give the same result. */
@@ -392,7 +280,9 @@ struct tm_cert sp_request(struct service_provider *sp,
         }
 
         /* update our tree */
-        sp->mt_leaves[req->idx - 1].val = u64_to_hash(fr.fr.counter);
+        sp->iomt->mt_leaves[req->idx - 1].val = u64_to_hash(fr.fr.counter);
+
+        merkle_update(sp->iomt, req->idx - 1, hash_node(sp->iomt->mt_leaves + req->idx - 1), NULL);
     }
 
     /* return values to caller */
@@ -417,13 +307,13 @@ void sp_test(void)
     /* construct a request to create a file */
     printf("File creation: ");
     int *file_compidx, *file_orders;
-    file_compidx = merkle_complement(0, sp->mt_logleaves, &file_orders);
+    file_compidx = merkle_complement(0, sp->iomt->mt_logleaves, &file_orders);
 
-    hash_t *file_comp = lookup_nodes(sp->mt_nodes, file_compidx, sp->mt_logleaves);
+    hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
 
     struct user_request req = req_filecreate(sp->tm, 1,
-                                             sp->mt_leaves + 0,
-                                             file_comp, file_orders, sp->mt_logleaves);
+                                             sp->iomt->mt_leaves + 0,
+                                             file_comp, file_orders, sp->iomt->mt_logleaves);
 
     hash_t req_hmac = hmac_sha256(&req, sizeof(req), "a", 1);
     hash_t fr_hmac;
@@ -438,12 +328,11 @@ void sp_test(void)
 
     struct iomt_node acl_node = (struct iomt_node) { 1, 1, u64_to_hash(3) };
 
-    //sp->mt_leaves[0].val = u64_to_hash(1);
     /* modification */
     struct user_request mod = req_filemodify(sp->tm,
                                              &fr_cert, fr_hmac,
-                                             sp->mt_leaves + 0,
-                                             file_comp, file_orders, sp->mt_logleaves,
+                                             sp->iomt->mt_leaves + 0,
+                                             file_comp, file_orders, sp->iomt->mt_logleaves,
                                              &acl_node,
                                              NULL, NULL, 0,
                                              hash_null);
@@ -479,6 +368,6 @@ void sp_test(void)
         struct iomt_node a = { 1, 2, hash_null };
         struct iomt_node b = { 2, 1, hash_null };
         printf("Merkle tree initialization: ");
-        check(hash_equals(sp->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
+        check(hash_equals(sp->iomt->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
     }
 }

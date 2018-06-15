@@ -184,6 +184,98 @@ int *merkle_complement_ordersonly(int leafidx, int logleaves)
     return orders;
 }
 
+/* Index-Ordered Merkle Tree routines: */
+/* Calculate the value of all the nodes of the tree, given the IOMT
+ * leaves in mt_leaves. Leaf count *must* be an integer power of two,
+ * otherwise bad things will happen. This function should only need to
+ * be called once, namely when the service provider is created. */
+void iomt_fill(struct iomt *tree)
+{
+    for(int i = 0; i < tree->mt_leafcount; ++i)
+    {
+        uint64_t mt_idx = (1 << tree->mt_logleaves) - 1 + i;
+        tree->mt_nodes[mt_idx] = hash_node(tree->mt_leaves + i);
+    }
+    /* now loop up from the bottom level, calculating the parent of
+     * each pair of nodes */
+    for(int i = tree->mt_logleaves - 1; i >= 0; --i)
+    {
+        uint64_t baseidx = (1 << i) - 1;
+        for(int j = 0; j < (1 << i); ++j)
+        {
+            uint64_t mt_idx = baseidx + j;
+            tree->mt_nodes[mt_idx] = merkle_parent(tree->mt_nodes[2 * mt_idx + 1],
+                                                 tree->mt_nodes[2 * mt_idx + 2],
+                                                 0);
+        }
+    }
+}
+
+/* A bit of a hack: our complement calculation returns the *indices*
+ * complementary nodes, which is good because the indices are much
+ * smaller than the actual nodes (which are 32 bytes each with
+ * SHA-256). However, the trusted module requires an array of the
+ * actual hash values of the complementary nodes. It would be optimal
+ * to modify each function to take the array of all nodes in the tree
+ * in addition to the complement indices, but this function will serve
+ * as a shim in the meantime. */
+hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n)
+{
+    hash_t *ret = calloc(n, sizeof(hash_t));
+    for(int i = 0; i < n; ++i)
+        ret[i] = nodes[indices[i]];
+    return ret;
+}
+
+void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n)
+{
+    for(int i = 0; i < n; ++i)
+        nodes[indices[i]] = values[i];
+}
+
+/* Update mt_nodes to reflect a change to a leaf node's
+ * value. Optionally, if old_dep is not NULL, *old_dep will be made to
+ * point to an array of length mt_logleaves that contains the old node
+ * values (whose indices are returned by merkle_dependents()). */
+void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep)
+{
+    if(old_dep)
+        *old_dep = calloc(tree->mt_logleaves, sizeof(hash_t));
+
+    uint64_t idx = (1 << tree->mt_logleaves) - 1 + leafidx;
+
+    tree->mt_nodes[idx] = newval;
+    for(int i = 0; i < tree->mt_logleaves; ++i)
+    {
+        /* find the merkle parent of the two children first */
+        hash_t parent = merkle_parent(tree->mt_nodes[idx],
+                                      tree->mt_nodes[bintree_sibling(idx)],
+                                      (idx + 1) & 1);
+
+        idx = bintree_parent(idx);
+
+        /* save old value */
+        if(old_dep)
+            (*old_dep)[i] = tree->mt_nodes[idx];
+
+        tree->mt_nodes[idx] = parent;
+    }
+}
+
+/* Create a merkle tree with 2^logleaves leaves, each initialized to a
+ * zero leaf (not a placeholder!) */
+struct iomt *iomt_new(int logleaves)
+{
+    struct iomt *tree = calloc(1, sizeof(struct iomt));
+    tree->mt_leafcount = 1 << logleaves;
+    tree->mt_logleaves = logleaves;
+    tree->mt_leaves = calloc(tree->mt_leafcount, sizeof(struct iomt_node));
+
+    tree->mt_nodes = calloc(2 * tree->mt_leafcount - 1, sizeof(hash_t));
+
+    return tree;
+}
+
 /* convert the first 8 bytes (little endian) to a 64-bit int */
 uint64_t hash_to_u64(hash_t h)
 {
