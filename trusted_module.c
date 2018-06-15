@@ -707,9 +707,9 @@ hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
 /* Decrypt a previously encrypted secret, and then encrypt for receipt
  * by a user. rv1 should bind the file index and counter to the
  * current root. rv2 should verify the user's access level in the
- * ACL. The index given in rv2 will select the key used to encrypt the
- * secret. As with tm_verify_and_encrypt_secret(), kf=HMAC(secret,
- * key=f_idx). */
+ * ACL. The index (which is a user id) given in rv2 will select the
+ * key used to encrypt the secret. As with
+ * tm_verify_and_encrypt_secret(), kf=HMAC(secret, key=f_idx). */
 
 /* Untested. */
 hash_t tm_retrieve_secret(const struct trusted_module *tm,
@@ -758,6 +758,13 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
     if(!hash_equals(rv2->rv.root, fr->fr.acl))
     {
         tm_seterror("RV2 root does not match ACL root");
+        return hash_null;
+    }
+
+    uint64_t access = hash_to_u64(rv2->rv.val);
+    if(access < 1)
+    {
+        tm_seterror("insufficient permissions");
         return hash_null;
     }
 
