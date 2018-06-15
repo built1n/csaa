@@ -11,7 +11,7 @@ struct trusted_module;
 struct user_request;
 
 struct tm_cert {
-    enum { NONE = 0, NU, EQ, RV, RU, FR, VR } type;
+    enum { CERT_NONE = 0, NU, EQ, RV, RU, FR, VR } type;
     union {
         struct {
             hash_t orig_node, new_node;
@@ -51,7 +51,7 @@ struct tm_cert {
 struct user_request {
     uint64_t idx; /* file index */
     uint64_t user_id; /* user id */
-    enum { ACL_UPDATE, FILE_UPDATE } type;
+    enum { REQ_NONE = 0, ACL_UPDATE, FILE_UPDATE } type;
     uint64_t counter; /* current counter value, 0 for creation */
     hash_t val; /* for ACL update, val=[root of ACL IOMT], for file
                  * update, val is a commitment to the contents, key,
@@ -85,7 +85,8 @@ struct user_request {
     };
 };
 
-static const struct tm_cert cert_null = { NONE };
+static const struct user_request req_null = { REQ_NONE };
+static const struct tm_cert cert_null = { CERT_NONE };
 
 /* creates 1 user with given shared secret */
 struct trusted_module *tm_new(const void *key, size_t keylen);
@@ -183,4 +184,10 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           const struct tm_cert *rv2, hash_t rv2_hmac,
                           const struct tm_cert *fr, hash_t fr_hmac,
                           hash_t secret, hash_t kf);
+
+hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen);
+
+const char *tm_geterror(void);
+
+void tm_seterror(const char *error);
 #endif

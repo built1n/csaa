@@ -18,8 +18,22 @@ struct tm_cert sp_request(struct service_provider *sp,
                           struct tm_cert *vr_out, hash_t *vr_hmac_out,
                           hash_t *ack_hmac_out,
                           hash_t encrypted_secret, hash_t kf,
-                          const void *encrypted_contents,
-                          size_t contents_len);
+                          const void *encrypted_contents, size_t contents_len,
+                          struct iomt *new_acl);
+
+/* Reserve a new file index with user_id added to the ACL. Returns
+ * cert on failure. Authenticated with ack_hmac, which is the returned
+ * request with a zero byte appended, signed by the module. */
+struct user_request sp_createfile(struct service_provider *sp,
+                                  uint64_t user_id, const void *key, size_t keylen,
+                                  hash_t *ack_hmac);
+
+struct user_request sp_modifyfile(struct service_provider *sp,
+                                  uint64_t user_id, const void *key, size_t keylen,
+                                  uint64_t file_idx,
+                                  hash_t encrypted_secret,
+                                  const void *encrypted_file, size_t filelen,
+                                  hash_t *ack_hmac);
 
 void sp_test(void);
 

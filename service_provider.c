@@ -9,7 +9,10 @@
 #include "crypto.h"
 #include "helper.h"
 #include "service_provider.h"
+#include "test.h"
 #include "trusted_module.h"
+
+#define ACL_LOGLEAVES 4
 
 struct file_version {
     hash_t kf; /* HMAC(key, file_idx) */
@@ -28,8 +31,7 @@ struct file_record {
     uint64_t version;
     uint64_t counter;
 
-    struct iomt_node *acl_leaves;
-    int acl_nleaves;
+    struct iomt *acl;
 
     struct tm_cert fr_cert; /* issued by module */
     hash_t fr_hmac;
@@ -113,9 +115,6 @@ struct tm_cert cert_eq(struct service_provider *sp,
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
 }
 
-/* in trusted_module.c */
-void check(int condition);
-
 /* leaf count will be 2^logleaves */
 struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 {
@@ -177,7 +176,6 @@ static struct file_record *lookup_record(struct service_provider *sp, int idx)
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
  * avoid copying (O(n) lookup, O(1) insertion)? Probably better to use a hash
  * table. */
-
 /* We do not check to ensure that there are no duplicate file indices;
  * this is up to the caller */
 static void append_record(struct service_provider *sp, const struct file_record *rec)
@@ -204,6 +202,10 @@ static void append_version(struct file_record *rec, const struct file_version *v
  * (otherwise they are ignored). `encrypted_secret' should be the file
  * encryption key XOR'd with HMAC(file index | file counter,
  * user_key). kf should be HMAC(encryption secret, file index).
+ *
+ * If the request is to either modify the ACL or create a file (which
+ * is essentially an ACL update), the ACL will be set to
+ * new_acl. `new_acl' must be in persistent storage.
  */
 struct tm_cert sp_request(struct service_provider *sp,
                           const struct user_request *req, hash_t req_hmac,
@@ -211,8 +213,8 @@ struct tm_cert sp_request(struct service_provider *sp,
                           struct tm_cert *vr_out, hash_t *vr_hmac_out,
                           hash_t *ack_hmac_out,
                           hash_t encrypted_secret, hash_t kf,
-                          const void *encrypted_contents,
-                          size_t contents_len)
+                          const void *encrypted_contents, size_t contents_len,
+                          struct iomt *new_acl)
 {
     struct tm_cert vr = cert_null;
     hash_t vr_hmac, ack_hmac, fr_hmac;
@@ -233,9 +235,20 @@ struct tm_cert sp_request(struct service_provider *sp,
             need_insert = true;
         }
 
+        rec->idx = fr.fr.idx;
         rec->counter = fr.fr.counter;
         rec->fr_cert = fr;
         rec->fr_hmac = fr_hmac;
+
+        if(req->type == ACL_UPDATE)
+        {
+            /* update our ACL */
+            iomt_free(rec->acl);
+            rec->acl = new_acl;
+
+            /* check that the passed value matches the calculated root */
+            assert(hash_equals(req->val, new_acl->mt_nodes[0]));
+        }
 
         if(rec->version != fr.fr.version)
         {
@@ -298,76 +311,134 @@ struct tm_cert sp_request(struct service_provider *sp,
     return fr;
 }
 
-void sp_test(void)
+struct user_request sp_createfile(struct service_provider *sp,
+                             uint64_t user_id, const void *key, size_t keylen,
+                             hash_t *ack_hmac)
 {
-    /* 2^10 = 1024 leaves ought to be enough for anybody */
-    int logleaves = 4;
-    struct service_provider *sp = sp_new("a", 1, logleaves);
+    int i;
+    for(i = 0; i < sp->iomt->mt_leafcount; ++i)
+    {
+        if(is_zero(sp->iomt->mt_leaves[i].val))
+            break;
+    }
 
-    /* construct a request to create a file */
-    printf("File creation: ");
+    /* fail */
+    if(i == sp->iomt->mt_leafcount)
+    {
+        return req_null;
+    }
+
     int *file_compidx, *file_orders;
-    file_compidx = merkle_complement(0, sp->iomt->mt_logleaves, &file_orders);
+    file_compidx = merkle_complement(i, sp->iomt->mt_logleaves, &file_orders);
 
     hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
 
-    struct user_request req = req_filecreate(sp->tm, 1,
-                                             sp->iomt->mt_leaves + 0,
+    struct iomt *acl = iomt_new(ACL_LOGLEAVES);
+    acl->mt_leaves[0] = (struct iomt_node) { user_id, user_id, u64_to_hash(3) };
+    merkle_update(acl, 0, hash_node(acl->mt_leaves + 0), NULL);
+
+    struct user_request req = req_filecreate(sp->tm,
+                                             i + 1,
+                                             sp->iomt->mt_leaves + i,
                                              file_comp, file_orders, sp->iomt->mt_logleaves);
-
-    hash_t req_hmac = hmac_sha256(&req, sizeof(req), "a", 1);
+    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
     hash_t fr_hmac;
-    hash_t ack_hmac;
 
-    struct tm_cert fr_cert = sp_request(sp, &req, req_hmac, &fr_hmac, NULL, NULL, &ack_hmac,
-                                        hash_null, hash_null, NULL, 0);
+    struct tm_cert fr_cert = sp_request(sp,
+                                        &req, req_hmac,
+                                        &fr_hmac,
+                                        NULL, NULL,
+                                        ack_hmac,
+                                        hash_null, hash_null, NULL, 0,
+                                        acl);
+    if(fr_cert.type == FR)
+        return req;
+    return req_null;
+}
 
-    check(fr_cert.type == FR &&
-          fr_cert.fr.counter == 1 &&
-          fr_cert.fr.version == 0);
-
-    struct iomt_node acl_node = (struct iomt_node) { 1, 1, u64_to_hash(3) };
-
+struct user_request sp_modifyfile(struct service_provider *sp,
+                                  uint64_t user_id, const void *key, size_t keylen,
+                                  uint64_t file_idx,
+                                  hash_t encrypted_secret,
+                                  const void *encrypted_file, size_t filelen,
+                                  hash_t *ack_hmac)
+{
     /* modification */
+    struct file_record *rec = lookup_record(sp, file_idx);
+    if(!rec)
+        return req_null;
+
+    struct iomt_node *file_node = lookup_leaf(sp->iomt, file_idx);
+
+    /* hack */
+    int leaf_idx = file_node - sp->iomt->mt_leaves;
+
+    int *file_compidx, *file_orders;
+    file_compidx = merkle_complement(leaf_idx, sp->iomt->mt_logleaves, &file_orders);
+
+    hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
+
+    /* get ACL node and its complement */
+    struct iomt_node *acl_node = lookup_leaf(rec->acl, user_id);
+    int aclnode_idx = acl_node - rec->acl->mt_leaves;
+    int *acl_orders;
+    int *acl_compidx = merkle_complement(aclnode_idx, rec->acl->mt_logleaves, &acl_orders);
+
+    hash_t *acl_comp = lookup_nodes(rec->acl->mt_nodes, acl_compidx, rec->acl->mt_logleaves);
+
     struct user_request mod = req_filemodify(sp->tm,
-                                             &fr_cert, fr_hmac,
-                                             sp->iomt->mt_leaves + 0,
+                                             &rec->fr_cert, rec->fr_hmac,
+                                             file_node,
                                              file_comp, file_orders, sp->iomt->mt_logleaves,
-                                             &acl_node,
-                                             NULL, NULL, 0,
+                                             acl_node,
+                                             acl_comp, acl_orders, rec->acl->mt_logleaves,
                                              hash_null);
 
-    req_hmac = hmac_sha256(&mod, sizeof(mod), "a", 1);
+    hash_t req_hmac = hmac_sha256(&mod, sizeof(mod), key, keylen);
 
     struct tm_cert vr;
-    hash_t vr_hmac;
+    hash_t vr_hmac, fr_hmac;
 
-    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, &ack_hmac,
-                                       hash_null, hash_null, "contents", 8);
-    printf("File modification: ");
-    check(new_fr.type == FR);
+    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, ack_hmac,
+                                       hash_null, hash_null, "contents", 8, NULL);
+    if(new_fr.type == FR)
+        return mod;
+    return req_null;
+}
 
-    printf("Complement calculation: ");
-    int *orders;
-    int *comp = merkle_complement(6, 4, &orders);
-    int correct[] = { 22, 9, 3, 2 };
-    int correct_orders[] = { 1, 0, 0, 1 };
-    check(!memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
-    free(orders);
-    free(comp);
+static bool ack_verify(const struct user_request *req,
+                       const void *secret, size_t secret_len,
+                       hash_t hmac)
+{
+    hash_t correct = ack_sign(req, secret, secret_len);
+    return hash_equals(hmac, correct);
+}
 
-    printf("Dependency calculation: ");
-    int *dep = merkle_dependents(6, 4);
-    int correct_dep[] = { 10, 4, 1, 0 };
-    check(!memcmp(dep, correct_dep, 4 * sizeof(int)));
-    free(dep);
+void sp_test(void)
+{
+    /* 2^10 = 1024 leaves ought to be enough for anybody */
+    int logleaves = 2;
+    struct service_provider *sp = sp_new("a", 1, logleaves);
+
+    check("Tree initialization", sp != NULL);
+
+    hash_t ack_hmac;
+    struct user_request req = sp_createfile(sp, 1, "a", 1, &ack_hmac);
+
+    check("File creation", ack_verify(&req, "a", 1, ack_hmac));
+
+    req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, NULL, 0, &ack_hmac);
+
+    check("File modification", ack_verify(&req, "a", 1, ack_hmac));
+
+    printf("CDI-IOMT contents: ");
+    iomt_dump(sp->iomt);
 
     /* test tree initilization (only simple case) */
     if(logleaves == 1)
     {
         struct iomt_node a = { 1, 2, hash_null };
         struct iomt_node b = { 2, 1, hash_null };
-        printf("Merkle tree initialization: ");
-        check(hash_equals(sp->iomt->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
+        check("Merkle tree initialization", hash_equals(sp->iomt->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
     }
 }

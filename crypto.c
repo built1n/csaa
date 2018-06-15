@@ -1,4 +1,5 @@
 #include "crypto.h"
+#include "test.h"
 
 #include <string.h>
 
@@ -262,6 +263,24 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
     }
 }
 
+/* find a node with given idx */
+struct iomt_node *lookup_leaf(struct iomt *tree, int idx)
+{
+    for(int i = 0; i < tree->mt_leafcount; ++i)
+        if(idx == tree->mt_leaves[i].idx)
+            return tree->mt_leaves + i;
+    return NULL;
+}
+
+void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
+{
+    /* update the leaf first, then use merkle_update */
+    struct iomt_node *leaf = lookup_leaf(tree, idx);
+    leaf->val = newval;
+
+    merkle_update(tree, idx, hash_node(leaf), NULL);
+}
+
 /* Create a merkle tree with 2^logleaves leaves, each initialized to a
  * zero leaf (not a placeholder!) */
 struct iomt *iomt_new(int logleaves)
@@ -274,6 +293,36 @@ struct iomt *iomt_new(int logleaves)
     tree->mt_nodes = calloc(2 * tree->mt_leafcount - 1, sizeof(hash_t));
 
     return tree;
+}
+
+void iomt_free(struct iomt *tree)
+{
+    /* TODO */
+    if(tree)
+    {
+    }
+}
+
+struct hashstring hash_format(hash_t h, int n)
+{
+    struct hashstring ret;
+    for(int i = 0; i < n; ++i)
+    {
+        sprintf(ret.str + 2 * i, "%02x", h.hash[i]);
+    }
+    return ret;
+}
+
+void iomt_dump(struct iomt *tree)
+{
+    for(int i = 0; i < tree->mt_leafcount; ++i)
+    {
+        printf("(%d, %s, %d)%s",
+               tree->mt_leaves[i].idx,
+               hash_format(tree->mt_leaves[i].val, 4).str,
+               tree->mt_leaves[i].next_idx,
+               (i == tree->mt_leafcount - 1) ? "\n" : ", ");
+    }
 }
 
 /* convert the first 8 bytes (little endian) to a 64-bit int */
@@ -294,4 +343,20 @@ hash_t u64_to_hash(uint64_t n)
         n >>= 8;
     }
     return ret;
+}
+
+void crypto_test(void)
+{
+    int *orders;
+    int *comp = merkle_complement(6, 4, &orders);
+    int correct[] = { 22, 9, 3, 2 };
+    int correct_orders[] = { 1, 0, 0, 1 };
+    check("Complement calculation", !memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
+    free(orders);
+    free(comp);
+
+    int *dep = merkle_dependents(6, 4);
+    int correct_dep[] = { 10, 4, 1, 0 };
+    check("Dependency calculation", !memcmp(dep, correct_dep, 4 * sizeof(int)));
+    free(dep);
 }

@@ -16,6 +16,7 @@
 
 #include "crypto.h"
 #include "service_provider.h"
+#include "test.h"
 #include "trusted_module.h"
 
 struct user_key {
@@ -36,9 +37,8 @@ struct trusted_module {
 
 static void tm_setroot(struct trusted_module *tm, hash_t newroot)
 {
-    //printf("New root: ");
+    printf("TM: %s -> %s\n", hash_format(tm->root, 4).str, hash_format(newroot, 4).str);
     tm->root = newroot;
-    //dump_hash(tm->root);
 }
 
 struct trusted_module *tm_new(const void *key, size_t keylen)
@@ -99,7 +99,7 @@ struct tm_cert tm_cert_node_update(const struct trusted_module *tm,
 }
 
 static const char *tm_error = NULL;
-static void tm_seterror(const char *error)
+void tm_seterror(const char *error)
 {
     tm_error = error;
 }
@@ -386,12 +386,11 @@ static bool req_verify(const struct trusted_module *tm, const struct user_reques
 /* Generate a signed acknowledgement for successful completion of a
  * request. We append a zero byte to the user request and take the
  * HMAC. */
-static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
+hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen)
 {
     HMAC_CTX *ctx = HMAC_CTX_new();
     HMAC_Init_ex(ctx,
-                 tm->user_keys[req->user_id - 1].key,
-                 tm->user_keys[req->user_id - 1].len,
+                 key, keylen,
                  EVP_sha256(), NULL);
 
     HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
@@ -404,6 +403,13 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
     HMAC_CTX_free(ctx);
 
     return hmac;
+}
+
+static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
+{
+    return ack_sign(req,
+                    tm->user_keys[req->user_id - 1].key,
+                    tm->user_keys[req->user_id - 1].len);
 }
 
 /* execute a user request, if possible */
@@ -790,14 +796,6 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
 }
 
 /* self-test */
-const char *tm_geterror(void);
-void check(int condition)
-{
-    printf(condition ? "\033[32;1mPASS\033[0m\n" : "\033[31;1mFAIL\033[0m\n");
-    if(!condition)
-        printf("%s\n", tm_geterror());
-}
-
 void tm_test(void)
 {
     {
@@ -809,8 +807,7 @@ void tm_test(void)
 
         /* this should return zero */
         hash_t res1 = merkle_compute(zero1, &zero2, orders, 1);
-        printf("Merkle parent with zeros: ");
-        check(is_zero(res1));
+        check("Merkle parent with zeros", is_zero(res1));
 
         hash_t a = sha256("a", 1);
         hash_t b = sha256("b", 1);
@@ -822,8 +819,7 @@ void tm_test(void)
         memcpy(buf, c.hash, 32);
         memcpy(buf + 32, d.hash, 32);
         //dump_hash(sha256(buf, 64));
-        printf("Merkle parent: ");
-        check(hash_equals(sha256(buf, 64), cd));
+        check("Merkle parent", hash_equals(sha256(buf, 64), cd));
 
         hash_t a_comp[] = { b, cd };
         int a_orders[] = { 1, 1 };
@@ -833,8 +829,7 @@ void tm_test(void)
         hash_t root2 = merkle_parent(ab, cd, 0);
         //dump_hash(root1);
         //dump_hash(root2);
-        printf("Merkle compute: ");
-        check(hash_equals(root1, root2));
+        check("Merkle compute", hash_equals(root1, root2));
     }
 
     {
@@ -851,17 +846,14 @@ void tm_test(void)
 
         hash_t hmac;
         struct tm_cert nu = tm_cert_node_update(tm, node, node_new, comp, orders, 1, &hmac);
-        printf("NU generation: ");
-        check(nu.type == NU &&
+        check("NU generation", nu.type == NU &&
               hash_equals(nu.nu.orig_node, node) &&
               hash_equals(nu.nu.orig_root, merkle_compute(node, comp, orders, 1)) &&
               hash_equals(nu.nu.new_node, node_new) &&
               hash_equals(nu.nu.new_root, merkle_compute(node_new, comp, orders, 1)));
-        printf("Certificate verification 1: ");
-        check(cert_verify(tm, &nu, hmac));
+        check("Certificate verification 1", cert_verify(tm, &nu, hmac));
         hash_t bogus = { { 0 } };
-        printf("Certificate verification 2: ");
-        check(!cert_verify(tm, &nu, bogus));
+        check("Certificate verification 2", !cert_verify(tm, &nu, bogus));
 
         /* test combining NU certificates */
         hash_t node_3 = sha256("c", 1);
@@ -869,8 +861,8 @@ void tm_test(void)
         hash_t hmac2, hmac_cat;
         struct tm_cert nu2 = tm_cert_node_update(tm, node_new, node_3, comp, orders, 1, &hmac2);
         struct tm_cert cat = tm_cert_combine(tm, &nu, hmac, &nu2, hmac2, &hmac_cat);
-        printf("Combine NU certificates: ");
-        check(nu2.type == NU &&
+        check("Combine NU certificates",
+              nu2.type == NU &&
               cat.type == NU &&
               hash_equals(cat.nu.orig_root, root_1) &&
               hash_equals(cat.nu.orig_node, node) &&

@@ -78,15 +78,19 @@ int *merkle_dependents(int leafidx, int logleaves);
 hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n);
 void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n);
 
-/* IOMT: */
-struct iomt *iomt_new(int logleaves);
-
 /* This function is prefixed merkle_ because it does not know about
  * any IOMT-specific properties (though it is still passed an iomt
  * struct) */
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep);
 
+struct iomt *iomt_new(int logleaves);
+void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
 void iomt_fill(struct iomt *tree);
+void iomt_dump(struct iomt *tree);
+struct iomt_node *lookup_leaf(struct iomt *tree, int idx);
+void iomt_free(struct iomt *tree);
+
+struct iomt_node *lookup_leaf(struct iomt *tree, int idx);
 
 int bintree_parent(int idx);
 int bintree_sibling(int idx);
@@ -95,4 +99,12 @@ uint64_t hash_to_u64(hash_t h);
 hash_t u64_to_hash(uint64_t n);
 void dump_hash(hash_t u);
 
+struct hashstring {
+    char str[32 * 2 + 1];
+};
+
+struct hashstring hash_format(hash_t h, int n);
+
+/* self-test */
+void crypto_test(void);
 #endif
