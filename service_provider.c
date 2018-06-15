@@ -111,6 +111,15 @@ struct tm_cert cert_eq(struct service_provider *sp,
     /* restore the tree */
     int *dep_indices = merkle_dependents(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt->mt_nodes,  dep_indices, old_depvalues, sp->iomt->mt_logleaves);
+    free(dep_indices);
+    free(old_depvalues);
+
+    free(compidx_enc);
+    free(compidx_ins);
+    free(comp_enc);
+    free(comp_ins);
+    free(orders_enc);
+    free(orders_ins);
 
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
 }
@@ -162,6 +171,29 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 
     /* everything else is already zeroed by calloc */
     return sp;
+}
+
+static void free_version(struct file_version *ver)
+{
+}
+
+static void free_record(struct file_record *rec)
+{
+    for(int i = 0; i < rec->nversions; ++i)
+        free_version(rec->versions + i);
+    free(rec->versions);
+    iomt_free(rec->acl);
+}
+
+void sp_free(struct service_provider *sp)
+{
+    for(int i = 0; i < sp->nrecords; ++i)
+        free_record(sp->records + i);
+    free(sp->records);
+
+    tm_free(sp->tm);
+    iomt_free(sp->iomt);
+    free(sp);
 }
 
 /* linear search for record given idx */
@@ -341,6 +373,7 @@ struct user_request sp_createfile(struct service_provider *sp,
                                              i + 1,
                                              sp->iomt->mt_leaves + i,
                                              file_comp, file_orders, sp->iomt->mt_logleaves);
+
     hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
     hash_t fr_hmac;
 
@@ -351,6 +384,10 @@ struct user_request sp_createfile(struct service_provider *sp,
                                         ack_hmac,
                                         hash_null, hash_null, NULL, 0,
                                         acl);
+    free(file_compidx);
+    free(file_comp);
+    free(file_orders);
+
     if(fr_cert.type == FR)
         return req;
     return req_null;
@@ -393,6 +430,12 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                              acl_node,
                                              acl_comp, acl_orders, rec->acl->mt_logleaves,
                                              hash_null);
+    free(file_comp);
+    free(acl_comp);
+    free(file_compidx);
+    free(acl_compidx);
+    free(file_orders);
+    free(acl_orders);
 
     hash_t req_hmac = hmac_sha256(&mod, sizeof(mod), key, keylen);
 
@@ -417,7 +460,7 @@ static bool ack_verify(const struct user_request *req,
 void sp_test(void)
 {
     /* 2^10 = 1024 leaves ought to be enough for anybody */
-    int logleaves = 2;
+    int logleaves = 10;
     struct service_provider *sp = sp_new("a", 1, logleaves);
 
     check("Tree initialization", sp != NULL);
@@ -437,8 +480,10 @@ void sp_test(void)
     /* test tree initilization (only simple case) */
     if(logleaves == 1)
     {
-        struct iomt_node a = { 1, 2, hash_null };
+        struct iomt_node a = { 1, 2, u64_to_hash(2) };
         struct iomt_node b = { 2, 1, hash_null };
         check("Merkle tree initialization", hash_equals(sp->iomt->mt_nodes[0], merkle_parent(hash_node(&a), hash_node(&b), 0)));
     }
+
+    sp_free(sp);
 }

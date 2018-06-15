@@ -56,7 +56,7 @@ struct user_request req_filecreate(const struct trusted_module *tm,
                                    const hash_t *file_comp, const int *file_orders, size_t file_n)
 {
     /* construct a request to create a file */
-    struct user_request req;
+    struct user_request req = req_null;
     req.idx = file_node->idx;
     req.user_id = user_id;
     req.type = ACL_UPDATE;
@@ -96,7 +96,7 @@ struct user_request req_filemodify(const struct trusted_module *tm,
                                    hash_t fileval)
 {
     /* modification */
-    struct user_request req;
+    struct user_request req = req_null;
     req.type = FILE_UPDATE;
 
     req.idx = file_node->idx;

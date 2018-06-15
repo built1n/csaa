@@ -10,6 +10,7 @@
 struct service_provider;
 
 struct service_provider *sp_new(const void *key, size_t keylen, int logleaves);
+void sp_free(struct service_provider *sp);
 
 /* see .c file for documentation */
 struct tm_cert sp_request(struct service_provider *sp,

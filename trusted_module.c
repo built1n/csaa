@@ -67,6 +67,12 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
     return tm;
 }
 
+void tm_free(struct trusted_module *tm)
+{
+    free(tm->user_keys);
+    free(tm);
+}
+
 static hash_t cert_sign(const struct trusted_module *tm, const struct tm_cert *cert)
 {
     return hmac_sha256(cert, sizeof(*cert), tm->secret, sizeof(tm->secret));
@@ -83,7 +89,7 @@ struct tm_cert tm_cert_node_update(const struct trusted_module *tm,
                                    const hash_t *comp, const int *orders, size_t n,
                                    hash_t *hmac)
 {
-    struct tm_cert cert;
+    struct tm_cert cert = cert_null;
     cert.type = NU;
     cert.nu.orig_node = orig;
     cert.nu.new_node = new;
@@ -136,7 +142,7 @@ struct tm_cert tm_cert_combine(const struct trusted_module *tm,
     if(hash_equals(nu1->nu.new_node, nu2->nu.orig_node) &&
        hash_equals(nu1->nu.new_root, nu2->nu.orig_root))
     {
-        struct tm_cert cert;
+        struct tm_cert cert = cert_null;
         cert.type = NU;
         cert.nu.orig_node = nu1->nu.orig_node;
         cert.nu.orig_root = nu1->nu.orig_root;
@@ -227,7 +233,7 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
     }
 
     /* we can now certify that y and y'' are equivalent roots */
-    struct tm_cert cert;
+    struct tm_cert cert = cert_null;
     memset(&cert, 0, sizeof(cert));
     cert.type = EQ;
     cert.eq.orig_root = nu_encl->nu.orig_root;
@@ -279,7 +285,7 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
     }
 
     /* verify that this node is a child of y */
-    struct tm_cert cert;
+    struct tm_cert cert = cert_null;
 
     memset(&cert, 0, sizeof(cert));
 
@@ -327,7 +333,7 @@ struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
         return cert_null;
     }
 
-    struct tm_cert cert;
+    struct tm_cert cert = cert_null;
     memset(&cert, 0, sizeof(cert));
 
     cert.type = RU;
@@ -531,7 +537,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         tm_setroot(tm, req->create.ru_cert.ru.new_root);
 
         /* issue an FR certificate */
-        struct tm_cert cert;
+        struct tm_cert cert = cert_null;
         cert.type = FR;
         cert.fr.idx = req->idx;
         cert.fr.counter = req->counter + 1;
@@ -624,7 +630,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
         /* We need to issue a VR certificate indicating the new
          * version's contents, and an FR certificate with the new
          * version number. */
-        struct tm_cert fr_cert, vr_cert;
+        struct tm_cert fr_cert = cert_null, vr_cert = cert_null;
         fr_cert.type = FR;
         fr_cert.fr.idx = req->idx;
         fr_cert.fr.counter = req->counter + 1;
@@ -650,7 +656,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
     else if(req->type == ACL_UPDATE)
     {
         /* We just need a new FR certificate with the new ACL. */
-        struct tm_cert cert;
+        struct tm_cert cert = cert_null;
         cert.type = FR;
         cert.fr.idx = req->idx;
         cert.fr.counter = req->counter + 1;
@@ -870,7 +876,7 @@ void tm_test(void)
               hash_equals(cat.nu.new_node, node_3) &&
               cert_verify(tm, &cat, hmac_cat));
 
-        //tm_free(tm);
+        tm_free(tm);
     }
 
     {

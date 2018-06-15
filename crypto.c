@@ -297,9 +297,11 @@ struct iomt *iomt_new(int logleaves)
 
 void iomt_free(struct iomt *tree)
 {
-    /* TODO */
     if(tree)
     {
+        free(tree->mt_nodes);
+        free(tree->mt_leaves);
+        free(tree);
     }
 }
 
