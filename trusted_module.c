@@ -37,7 +37,7 @@ struct trusted_module {
 
 static void tm_setroot(struct trusted_module *tm, hash_t newroot)
 {
-    printf("TM: %s -> %s\n", hash_format(tm->root, 4).str, hash_format(newroot, 4).str);
+    //printf("TM: %s -> %s\n", hash_format(tm->root, 4).str, hash_format(newroot, 4).str);
     tm->root = newroot;
 }
 
@@ -246,7 +246,7 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
 /* nu must be of the form [x,y,x,y] to indicate that x is a child of y */
 /* also, if b > 0 and nonexist != NULL, this function will generate a
  * certificate indicating that no node with index b exists with root
- * y*/
+ * y */
 struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
                                      const struct iomt_node *node,
@@ -804,6 +804,106 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                       tm->user_keys[rv2->rv.idx - 1].key,
                       tm->user_keys[rv2->rv.idx - 1].len);
     return hash_xor(secret, pad);
+}
+
+static hash_t sign_response(const struct trusted_module *tm,
+                            const struct version_info *ver,
+                            uint64_t user_id)
+{
+    return hmac_sha256(ver, sizeof(*ver),
+                       tm->user_keys[user_id - 1].key,
+                       tm->user_keys[user_id - 1].len);
+}
+
+/* Verify the integrity of file information passed in the four
+ * certificates by checking it against the current root; response is
+ * authenticated with HMAC(response, user_key). RV1 should verify the
+ * current file counter value against the current root. RV2 should
+ * prove that the user has the proper access level in the ACL. VR
+ * should be signed and can be any version (not just the latest
+ * one). Finally, FR should be the latest file record certificate
+ * issued by the module, reflecting the latest counter value and
+ * ACL. */
+struct version_info tm_verify_file(const struct trusted_module *tm,
+                                   const struct tm_cert *rv1, hash_t rv1_hmac,
+                                   const struct tm_cert *rv2, hash_t rv2_hmac,
+                                   const struct tm_cert *fr, hash_t fr_hmac,
+                                   const struct tm_cert *vr, hash_t vr_hmac,
+                                   hash_t *response_hmac)
+{
+    struct version_info verinfo = verinfo_null;
+
+    /* No authenticated response if the parameters are incorrect or
+     * improperly signed; it is the service provider's responsibility
+     * to make sure these are correct, because if they are not, the
+     * user will not receive the expected authentication. */
+    if(!rv1 || !rv2 || !fr || !vr)
+    {
+        tm_seterror("null paramter");
+        return verinfo_null;
+    }
+
+    if(!cert_verify(tm, rv1, rv1_hmac) ||
+       !cert_verify(tm, rv2, rv2_hmac) ||
+       !cert_verify(tm, fr, fr_hmac)   ||
+       !cert_verify(tm, vr, vr_hmac))
+
+    {
+        tm_seterror("certificate signature invalid");
+        return verinfo_null;
+    }
+
+    /* Prepare the denial response now so we can fail if needed. */
+    verinfo.idx = fr->fr.idx;
+    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
+
+    /* Check RV1 against root */
+    if(!hash_equals(rv1->rv.root, tm->root))
+    {
+        tm_seterror("RV1 does not reflect current root");
+        return verinfo;
+    }
+
+    /* Ensure that all file indices match */
+    if(rv1->rv.idx != fr->fr.idx ||
+       rv1->rv.idx != vr->vr.idx)
+    {
+        tm_seterror("certificate indices do not match");
+        return verinfo;
+    }
+
+    /* Ensure that the FR certificate is fresh by checking the counter
+     * against the value of RV1 (which is guaranteed to be fresh) */
+    if(hash_to_u64(rv1->rv.val) != fr->fr.counter)
+    {
+        tm_seterror("FR counter is not fresh");
+        return verinfo;
+    }
+
+    /* Make sure that RV2's root is the file ACL */
+    if(!hash_equals(rv2->rv.root, fr->fr.acl))
+    {
+        tm_seterror("RV2 does not have file ACL as root");
+        return verinfo;
+    }
+
+    /* Check whether file exists and that the access level is sufficient */
+    if(is_zero(rv1->rv.val) ||
+       hash_to_u64(rv2->rv.val) < 1)
+    {
+        tm_seterror("insufficient permissions or file does not exist");
+        return verinfo;
+    }
+
+    /* We have verified that the file exists and can convey this to
+     * the user */
+    verinfo.counter = fr->fr.counter;
+    verinfo.max_version = fr->fr.version;
+    verinfo.version = vr->vr.version;
+    verinfo.lambda = vr->vr.hash;
+
+    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
+    return verinfo;
 }
 
 /* self-test */

@@ -396,7 +396,7 @@ struct user_request sp_createfile(struct service_provider *sp,
 struct user_request sp_modifyfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   uint64_t file_idx,
-                                  hash_t encrypted_secret,
+                                  hash_t encrypted_secret, hash_t kf,
                                   const void *encrypted_file, size_t filelen,
                                   hash_t *ack_hmac)
 {
@@ -442,8 +442,17 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     struct tm_cert vr;
     hash_t vr_hmac, fr_hmac;
 
-    struct tm_cert new_fr = sp_request(sp, &mod, req_hmac, &fr_hmac, &vr, &vr_hmac, ack_hmac,
-                                       hash_null, hash_null, "contents", 8, NULL);
+    struct tm_cert new_fr = sp_request(sp,
+                                       &mod, req_hmac,
+                                       &fr_hmac,
+                                       &vr, &vr_hmac,
+                                       ack_hmac,
+                                       encrypted_secret, kf,
+                                       encrypted_file, filelen,
+                                       NULL);
+
+    /* We return the request because that is how the module's
+     * authentication is done. */
     if(new_fr.type == FR)
         return mod;
     return req_null;
@@ -457,11 +466,17 @@ static bool ack_verify(const struct user_request *req,
     return hash_equals(hmac, correct);
 }
 
+#include <time.h>
+
 void sp_test(void)
 {
-    /* 2^10 = 1024 leaves ought to be enough for anybody */
-    int logleaves = 10;
+    int logleaves = 4;
+    printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
+
+    clock_t start = clock();
     struct service_provider *sp = sp_new("a", 1, logleaves);
+    clock_t stop = clock();
+    printf("%.1f placeholder insertions per second\n", (double)(1ULL << logleaves) * CLOCKS_PER_SEC / (stop - start));
 
     check("Tree initialization", sp != NULL);
 
@@ -470,12 +485,20 @@ void sp_test(void)
 
     check("File creation", ack_verify(&req, "a", 1, ack_hmac));
 
-    req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, NULL, 0, &ack_hmac);
+#define N_MODIFY 1000
+    start = clock();
+    for(int i = 0; i < N_MODIFY; ++i)
+        req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, NULL, 0, &ack_hmac);
+    stop = clock();
+    printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
     check("File modification", ack_verify(&req, "a", 1, ack_hmac));
 
-    printf("CDI-IOMT contents: ");
-    iomt_dump(sp->iomt);
+    if(logleaves < 5)
+    {
+        printf("CDI-IOMT contents: ");
+        iomt_dump(sp->iomt);
+    }
 
     /* test tree initilization (only simple case) */
     if(logleaves == 1)

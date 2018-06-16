@@ -32,7 +32,7 @@ struct user_request sp_createfile(struct service_provider *sp,
 struct user_request sp_modifyfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   uint64_t file_idx,
-                                  hash_t encrypted_secret,
+                                  hash_t encrypted_secret, hash_t kf,
                                   const void *encrypted_file, size_t filelen,
                                   hash_t *ack_hmac);
 

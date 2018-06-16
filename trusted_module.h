@@ -43,7 +43,8 @@ struct tm_cert {
         struct {
             uint64_t idx;
             uint64_t version;
-            hash_t hash; /* commitment to contents, key, and index */
+            hash_t hash; /* lambda value: the commitment to contents,
+                          * key, and index */
         } vr; /* version record (of a file) */
     };
 };
@@ -85,8 +86,16 @@ struct user_request {
     };
 };
 
+struct version_info {
+    uint64_t idx;
+    uint64_t counter;
+    uint64_t version, max_version;
+    hash_t lambda; /* equal to HMAC(h(encrypted_contents), key=HMAC(key, file_idx)) */
+};
+
 static const struct user_request req_null = { REQ_NONE };
 static const struct tm_cert cert_null = { CERT_NONE };
+static const struct version_info verinfo_null = { 0 };
 
 /* creates 1 user with given shared secret */
 struct trusted_module *tm_new(const void *key, size_t keylen);
@@ -184,6 +193,13 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           const struct tm_cert *rv2, hash_t rv2_hmac,
                           const struct tm_cert *fr, hash_t fr_hmac,
                           hash_t secret, hash_t kf);
+
+struct version_info tm_verify_file(const struct trusted_module *tm,
+                                   const struct tm_cert *rv1, hash_t rv1_hmac,
+                                   const struct tm_cert *rv2, hash_t rv2_hmac,
+                                   const struct tm_cert *fr, hash_t fr_hmac,
+                                   const struct tm_cert *vr, hash_t vr_hmac,
+                                   hash_t *response_hmac);
 
 hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen);
 
