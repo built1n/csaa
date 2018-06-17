@@ -853,15 +853,11 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
         return verinfo_null;
     }
 
-    /* Prepare the denial response now so we can fail if needed. */
-    verinfo.idx = fr->fr.idx;
-    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
-
     /* Check RV1 against root */
     if(!hash_equals(rv1->rv.root, tm->root))
     {
         tm_seterror("RV1 does not reflect current root");
-        return verinfo;
+        return verinfo_null;
     }
 
     /* Ensure that all file indices match */
@@ -869,7 +865,7 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
        rv1->rv.idx != vr->vr.idx)
     {
         tm_seterror("certificate indices do not match");
-        return verinfo;
+        return verinfo_null;
     }
 
     /* Ensure that the FR certificate is fresh by checking the counter
@@ -877,15 +873,19 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     if(hash_to_u64(rv1->rv.val) != fr->fr.counter)
     {
         tm_seterror("FR counter is not fresh");
-        return verinfo;
+        return verinfo_null;
     }
 
     /* Make sure that RV2's root is the file ACL */
     if(!hash_equals(rv2->rv.root, fr->fr.acl))
     {
         tm_seterror("RV2 does not have file ACL as root");
-        return verinfo;
+        return verinfo_null;
     }
+
+    /* Prepare the denial response now so we can fail if needed. */
+    verinfo.idx = fr->fr.idx;
+    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
 
     /* Check whether file exists and that the access level is sufficient */
     if(is_zero(rv1->rv.val) ||
