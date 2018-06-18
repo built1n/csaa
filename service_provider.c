@@ -526,9 +526,9 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                           comp, orders, sp->iomt->mt_logleaves,
                           &rv1_hmac,
                           0, NULL, NULL);
-            free(orders);
-            free(compidx);
             free(comp);
+            free(compidx);
+            free(orders);
         }
         else
         {
@@ -542,6 +542,10 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                     comp, orders, sp->iomt->mt_logleaves,
                     NULL,
                     file_idx, &rv1, &rv1_hmac);
+
+            free(comp);
+            free(compidx);
+            free(orders);
         }
 
         return tm_verify_file(sp->tm,
@@ -597,7 +601,7 @@ void sp_test(void)
 
     check("File creation", ack_verify(&req, "a", 1, ack_hmac));
 
-#define N_MODIFY 1000
+#define N_MODIFY 10000
     start = clock();
     for(int i = 0; i < N_MODIFY; ++i)
         req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, "contents", 8, &ack_hmac);
@@ -619,10 +623,20 @@ void sp_test(void)
         check("Authenticated denial 2", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         /* check in range */
-        vi = sp_fileinfo(sp, 1, 1, 1, &hmac);
+        vi = sp_fileinfo(sp,
+                         1, /* user */
+                         1, /* file */
+                         1, /* version */
+                         &hmac);
         check("File info retrieval 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
-        struct version_info correct = { 1, 1001, 1, 1 };
+        hash_t gamma = sha256("contents", 8);
+        hash_t kf = hash_null;
+        hash_t lambda = hmac_sha256(&gamma, sizeof(gamma),
+                                    &kf, sizeof(kf));
+
+        struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, lambda };
+        check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
     }
 
     if(logleaves < 5)

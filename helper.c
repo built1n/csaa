@@ -5,6 +5,7 @@
  * functions to handle the generation of these needed certificates. */
 
 #include <assert.h>
+#include <stdlib.h>
 
 #include "crypto.h"
 #include "trusted_module.h"
@@ -82,6 +83,9 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
                 idx,
                 &cert, hmac_out);
     }
+
+    free(comp);
+    free(orders);
 
     return cert;
 }
