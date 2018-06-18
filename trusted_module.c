@@ -262,6 +262,13 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
         tm_seterror("improper certificate authentication");
         return cert_null;
     }
+
+    if(nu->type != NU)
+    {
+        tm_seterror("wrong certificate type");
+        return cert_null;
+    }
+
     if(!hash_equals(nu->nu.orig_node, nu->nu.new_node) || !hash_equals(nu->nu.orig_root, nu->nu.new_root))
         return cert_null;
 
@@ -299,7 +306,9 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
     cert.rv.idx = node->idx;
     cert.rv.val = node->val;
 
-    *hmac_out = cert_sign(tm, &cert);
+    /* can be NULL */
+    if(hmac_out)
+        *hmac_out = cert_sign(tm, &cert);
     return cert;
 }
 
@@ -397,7 +406,7 @@ static bool req_verify(const struct trusted_module *tm, const struct user_reques
 /* Generate a signed acknowledgement for successful completion of a
  * request. We append a zero byte to the user request and take the
  * HMAC. */
-hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen)
+hash_t ack_sign(const struct user_request *req, int nzeros, const void *key, size_t keylen)
 {
     HMAC_CTX *ctx = HMAC_CTX_new();
     HMAC_Init_ex(ctx,
@@ -407,7 +416,8 @@ hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen)
     HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
 
     unsigned char zero = 0;
-    HMAC_Update(ctx, &zero, 1);
+    for(int i = 0; i < nzeros; ++i)
+        HMAC_Update(ctx, &zero, 1);
 
     hash_t hmac;
     HMAC_Final(ctx, hmac.hash, NULL);
@@ -419,6 +429,7 @@ hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen)
 static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
 {
     return ack_sign(req,
+                    1,
                     tm->user_keys[req->user_id - 1].key,
                     tm->user_keys[req->user_id - 1].len);
 }
@@ -510,6 +521,12 @@ struct tm_cert tm_request(struct trusted_module *tm,
         /* we treat the hash like a 256-bit little-endian counter */
         hash_t one = u64_to_hash(1);
 
+        if(req->create.ru_cert.type != RU)
+        {
+            tm_seterror("wrong certificate type (should be RU)");
+            return cert_null;
+        }
+
         /* first check the validity of the certificate */
         if(!cert_verify(tm, &req->create.ru_cert, req->create.ru_hmac))
         {
@@ -529,12 +546,6 @@ struct tm_cert tm_request(struct trusted_module *tm,
            !hash_equals(req->create.ru_cert.ru.new_val, one))
         {
             tm_seterror("RU cert does not show needed information");
-            printf("%d %d %d %d\n", req->create.ru_cert.ru.idx != req->idx,
-                   !is_zero(req->create.ru_cert.ru.orig_val),
-                   !hash_equals(req->create.ru_cert.ru.orig_root, tm->root),
-                   !hash_equals(req->create.ru_cert.ru.new_val, one));
-            dump_hash(req->create.ru_cert.ru.orig_root);
-            dump_hash(tm->root);
             return cert_null;
         }
 
@@ -575,6 +586,14 @@ struct tm_cert tm_request(struct trusted_module *tm,
     if(!cert_verify(tm, &req->modify.ru_cert, req->modify.ru_hmac))
     {
         tm_seterror("RU certificate improperly authenticated");
+        return cert_null;
+    }
+
+    if(req->modify.fr_cert.type != FR ||
+       req->modify.rv_cert.type != RV ||
+       req->modify.ru_cert.type != RU)
+    {
+        tm_seterror("wrong certificate type");
         return cert_null;
     }
 
@@ -818,13 +837,16 @@ static hash_t sign_response(const struct trusted_module *tm,
 /* Verify the integrity of file information passed in the four
  * certificates by checking it against the current root; response is
  * authenticated with HMAC(response, user_key). RV1 should verify the
- * current file counter value against the current root. RV2 should
+ * current file counter value against the current root. If the value
+ * field for RV1 is zero, then the file does not exist, and the
+ * remaining certificates are not needed and can be null. RV2 should
  * prove that the user has the proper access level in the ACL. VR
  * should be signed and can be any version (not just the latest
  * one). Finally, FR should be the latest file record certificate
  * issued by the module, reflecting the latest counter value and
  * ACL. */
 struct version_info tm_verify_file(const struct trusted_module *tm,
+                                   uint64_t user_id,
                                    const struct tm_cert *rv1, hash_t rv1_hmac,
                                    const struct tm_cert *rv2, hash_t rv2_hmac,
                                    const struct tm_cert *fr, hash_t fr_hmac,
@@ -837,19 +859,21 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
      * improperly signed; it is the service provider's responsibility
      * to make sure these are correct, because if they are not, the
      * user will not receive the expected authentication. */
-    if(!rv1 || !rv2 || !fr || !vr)
+    if(!rv1)
     {
-        tm_seterror("null paramter");
+        tm_seterror("null parameter");
         return verinfo_null;
     }
 
-    if(!cert_verify(tm, rv1, rv1_hmac) ||
-       !cert_verify(tm, rv2, rv2_hmac) ||
-       !cert_verify(tm, fr, fr_hmac)   ||
-       !cert_verify(tm, vr, vr_hmac))
-
+    if(rv1->type != RV)
     {
-        tm_seterror("certificate signature invalid");
+        tm_seterror("RV1 is not RV certificate");
+        return verinfo_null;
+    }
+
+    if(!cert_verify(tm, rv1, rv1_hmac))
+    {
+        tm_seterror("RV1 certificate signature invalid");
         return verinfo_null;
     }
 
@@ -857,6 +881,37 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     if(!hash_equals(rv1->rv.root, tm->root))
     {
         tm_seterror("RV1 does not reflect current root");
+        return verinfo_null;
+    }
+
+    /* File does not exist; issue authenticated denial. */
+    if(is_zero(rv1->rv.val))
+    {
+        verinfo.idx = rv1->rv.idx;
+        *response_hmac = sign_response(tm, &verinfo, user_id);
+        return verinfo;
+    }
+
+    /* We must have the other 3 certificates to continue. */
+    if(!rv2 || !fr || !vr)
+    {
+        tm_seterror("null parameter");
+        return verinfo_null;
+    }
+
+    if(!cert_verify(tm, rv2, rv2_hmac) ||
+       !cert_verify(tm, fr, fr_hmac)   ||
+       !cert_verify(tm, vr, vr_hmac))
+    {
+        tm_seterror("certificate signature invalid");
+        return verinfo_null;
+    }
+
+    if(rv2->type != RV ||
+       fr->type != FR  ||
+       vr->type != VR)
+    {
+        tm_seterror("wrong certificate type");
         return verinfo_null;
     }
 
@@ -876,6 +931,12 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
         return verinfo_null;
     }
 
+    if(rv2->rv.idx != user_id)
+    {
+        tm_seterror("RV2 index does not match user id");
+        return verinfo_null;
+    }
+
     /* Make sure that RV2's root is the file ACL */
     if(!hash_equals(rv2->rv.root, fr->fr.acl))
     {
@@ -887,11 +948,9 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     verinfo.idx = fr->fr.idx;
     *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
 
-    /* Check whether file exists and that the access level is sufficient */
-    if(is_zero(rv1->rv.val) ||
-       hash_to_u64(rv2->rv.val) < 1)
+    if(hash_to_u64(rv2->rv.val) < 1)
     {
-        tm_seterror("insufficient permissions or file does not exist");
+        /* insufficient access level */
         return verinfo;
     }
 
@@ -902,7 +961,7 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     verinfo.version = vr->vr.version;
     verinfo.lambda = vr->vr.hash;
 
-    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
+    *response_hmac = sign_response(tm, &verinfo, user_id);
     return verinfo;
 }
 

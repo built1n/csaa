@@ -36,6 +36,8 @@ struct file_record {
     struct tm_cert fr_cert; /* issued by module */
     hash_t fr_hmac;
 
+    /* Version numbers start at 1 and are not stored
+     * explicitly. versions[0] refers to version 1. */
     struct file_version *versions;
     int nversions;
 };
@@ -84,8 +86,8 @@ struct tm_cert cert_eq(struct service_provider *sp,
     hash_t h_ins = hash_node(&insert);
 
     int *orders_enc, *orders_ins;
-    int *compidx_enc = merkle_complement(encloser_leafidx, sp->iomt->mt_logleaves, &orders_enc);
-    int *compidx_ins = merkle_complement(placeholder_leafidx, sp->iomt->mt_logleaves, &orders_ins);
+    int *compidx_enc = bintree_complement(encloser_leafidx, sp->iomt->mt_logleaves, &orders_enc);
+    int *compidx_ins = bintree_complement(placeholder_leafidx, sp->iomt->mt_logleaves, &orders_ins);
 
     hash_t *comp_enc = lookup_nodes(sp->iomt->mt_nodes, compidx_enc, sp->iomt->mt_logleaves);
 
@@ -109,7 +111,7 @@ struct tm_cert cert_eq(struct service_provider *sp,
                                              &nu2_hmac);
 
     /* restore the tree */
-    int *dep_indices = merkle_dependents(encloser_leafidx, sp->iomt->mt_logleaves);
+    int *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt->mt_nodes,  dep_indices, old_depvalues, sp->iomt->mt_logleaves);
     free(dep_indices);
     free(old_depvalues);
@@ -175,6 +177,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 
 static void free_version(struct file_version *ver)
 {
+    free(ver->contents);
 }
 
 static void free_record(struct file_record *rec)
@@ -287,6 +290,8 @@ struct tm_cert sp_request(struct service_provider *sp,
             rec->version = fr.fr.version;
 
             struct file_version ver;
+            memset(&ver, 0, sizeof(ver));
+
             hash_t gamma = sha256(encrypted_contents, contents_len);
             ver.l = hmac_sha256(&gamma, sizeof(gamma),
                                 &kf, sizeof(kf));
@@ -312,6 +317,14 @@ struct tm_cert sp_request(struct service_provider *sp,
 
             ver.vr_cert = vr;
             ver.vr_hmac = vr_hmac;
+
+            if(encrypted_contents)
+            {
+                /* duplicate */
+                ver.contents = malloc(contents_len);
+                memcpy(ver.contents, encrypted_contents, contents_len);
+                ver.len = contents_len;
+            }
 
             append_version(rec, &ver);
         }
@@ -361,7 +374,7 @@ struct user_request sp_createfile(struct service_provider *sp,
     }
 
     int *file_compidx, *file_orders;
-    file_compidx = merkle_complement(i, sp->iomt->mt_logleaves, &file_orders);
+    file_compidx = bintree_complement(i, sp->iomt->mt_logleaves, &file_orders);
 
     hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
 
@@ -405,23 +418,27 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     if(!rec)
         return req_null;
 
-    struct iomt_node *file_node = lookup_leaf(sp->iomt, file_idx);
+    struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx);
 
     /* hack */
     int leaf_idx = file_node - sp->iomt->mt_leaves;
 
     int *file_compidx, *file_orders;
-    file_compidx = merkle_complement(leaf_idx, sp->iomt->mt_logleaves, &file_orders);
+    file_compidx = bintree_complement(leaf_idx, sp->iomt->mt_logleaves, &file_orders);
 
     hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
 
     /* get ACL node and its complement */
-    struct iomt_node *acl_node = lookup_leaf(rec->acl, user_id);
+    struct iomt_node *acl_node = iomt_find_leaf(rec->acl, user_id);
     int aclnode_idx = acl_node - rec->acl->mt_leaves;
     int *acl_orders;
-    int *acl_compidx = merkle_complement(aclnode_idx, rec->acl->mt_logleaves, &acl_orders);
+    int *acl_compidx = bintree_complement(aclnode_idx, rec->acl->mt_logleaves, &acl_orders);
 
     hash_t *acl_comp = lookup_nodes(rec->acl->mt_nodes, acl_compidx, rec->acl->mt_logleaves);
+
+    hash_t gamma = sha256(encrypted_file, filelen);
+    hash_t lambda = hmac_sha256(&gamma, sizeof(gamma),
+                                &kf, sizeof(kf));
 
     struct user_request mod = req_filemodify(sp->tm,
                                              &rec->fr_cert, rec->fr_hmac,
@@ -429,7 +446,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                              file_comp, file_orders, sp->iomt->mt_logleaves,
                                              acl_node,
                                              acl_comp, acl_orders, rec->acl->mt_logleaves,
-                                             hash_null);
+                                             lambda);
     free(file_comp);
     free(acl_comp);
     free(file_compidx);
@@ -462,15 +479,110 @@ static bool ack_verify(const struct user_request *req,
                        const void *secret, size_t secret_len,
                        hash_t hmac)
 {
-    hash_t correct = ack_sign(req, secret, secret_len);
+    hash_t correct = ack_sign(req, 1, secret, secret_len);
     return hash_equals(hmac, correct);
+}
+
+/* Retrieve authenticated information (using the user's secret as the
+ * key) on a version of a file; if version is zero, default to the
+ * latest version. If the file does not exist, the function will still
+ * succeed, returning an authenticated structure indicating
+ * failure. */
+struct version_info sp_fileinfo(struct service_provider *sp,
+                                uint64_t user_id,
+                                uint64_t file_idx,
+                                uint64_t version,
+                                hash_t *hmac)
+{
+    struct file_record *rec = lookup_record(sp, file_idx);
+
+    /* Produce an authenticated denial proving that no file exists
+     * with the given index. */
+    if(!rec)
+    {
+        /* In theory, we would have to perform a linear search now to
+         * either find a placeholder node for this file index, or an
+         * enclosing node, both of which would prove that no file with
+         * the given index exists. However, we can cheat since we know
+         * that our IOMT is initialized with all the node indices
+         * falling densely into the range [1,2^logleaves]. If the
+         * index falls into this range, we can generate a RV
+         * certificate indicating that it has a zero counter value
+         * (and hence no associated file), or if it falls outside this
+         * range, by generating an RV certificate indicating the
+         * nonexistence of this node index. */
+        struct tm_cert rv1;
+        hash_t rv1_hmac;
+
+        if(1 <= file_idx && file_idx <= sp->iomt->mt_leafcount)
+        {
+            int *orders, *compidx;
+            compidx = bintree_complement(file_idx - 1, sp->iomt->mt_logleaves, &orders);
+            hash_t *comp = lookup_nodes(sp->iomt->mt_nodes, compidx, sp->iomt->mt_logleaves);
+
+            /* Placeholder exists. */
+            rv1 = cert_rv(sp->tm,
+                          sp->iomt->mt_leaves + file_idx - 1,
+                          comp, orders, sp->iomt->mt_logleaves,
+                          &rv1_hmac,
+                          0, NULL, NULL);
+            free(orders);
+            free(compidx);
+            free(comp);
+        }
+        else
+        {
+            /* Use last node as encloser */
+            int *orders, *compidx;
+            compidx = bintree_complement(sp->iomt->mt_leafcount - 1, sp->iomt->mt_logleaves, &orders);
+            hash_t *comp = lookup_nodes(sp->iomt->mt_nodes, compidx, sp->iomt->mt_logleaves);
+
+            cert_rv(sp->tm,
+                    sp->iomt->mt_leaves + sp->iomt->mt_leafcount - 1,
+                    comp, orders, sp->iomt->mt_logleaves,
+                    NULL,
+                    file_idx, &rv1, &rv1_hmac);
+        }
+
+        return tm_verify_file(sp->tm,
+                              user_id,
+                              &rv1, rv1_hmac,
+                              NULL, hash_null,
+                              NULL, hash_null,
+                              NULL, hash_null,
+                              hmac);
+    }
+
+    /* RV1 indicates counter */
+    hash_t rv1_hmac;
+    struct tm_cert rv1 = cert_rv_by_idx(sp->tm,
+                                        sp->iomt,
+                                        file_idx,
+                                        &rv1_hmac);
+
+    /* RV2 indicates access rights */
+    hash_t rv2_hmac;
+    struct tm_cert rv2 = cert_rv_by_idx(sp->tm,
+                                        rec->acl,
+                                        user_id,
+                                        &rv2_hmac);
+
+    struct file_version *ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
+
+    return tm_verify_file(sp->tm,
+                          user_id,
+                          &rv1, rv1_hmac,
+                          &rv2, rv2_hmac,
+                          &rec->fr_cert, rec->fr_hmac,
+                          &ver->vr_cert, ver->vr_hmac,
+                          hmac);
 }
 
 #include <time.h>
 
 void sp_test(void)
 {
-    int logleaves = 4;
+    int logleaves = 5;
     printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
     clock_t start = clock();
@@ -488,11 +600,30 @@ void sp_test(void)
 #define N_MODIFY 1000
     start = clock();
     for(int i = 0; i < N_MODIFY; ++i)
-        req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, NULL, 0, &ack_hmac);
+        req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, "contents", 8, &ack_hmac);
+
     stop = clock();
     printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
     check("File modification", ack_verify(&req, "a", 1, ack_hmac));
+
+    /* test retrieval */
+    {
+        hash_t hmac;
+        /* check inside range, but empty slot */
+        struct version_info vi = sp_fileinfo(sp, 1, 12, 1, &hmac);
+        check("Authenticated denial 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
+
+        /* check outside range */
+        vi = sp_fileinfo(sp, 1, (1 << sp->iomt->mt_logleaves) + 1, 1, &hmac);
+        check("Authenticated denial 2", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
+
+        /* check in range */
+        vi = sp_fileinfo(sp, 1, 1, 1, &hmac);
+        check("File info retrieval 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
+
+        struct version_info correct = { 1, 1001, 1, 1 };
+    }
 
     if(logleaves < 5)
     {
@@ -500,7 +631,7 @@ void sp_test(void)
         iomt_dump(sp->iomt);
     }
 
-    /* test tree initilization (only simple case) */
+    /* test tree initialization (only simple case) */
     if(logleaves == 1)
     {
         struct iomt_node a = { 1, 2, u64_to_hash(2) };

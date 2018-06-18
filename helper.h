@@ -13,6 +13,14 @@ struct tm_cert cert_rv(const struct trusted_module *tm,
                        uint64_t b,
                        struct tm_cert *nonexist, hash_t *hmac_nonexist);
 
+/* Search the leaves of the IOMT for the index, or find an enclosing
+ * node, generating an RV certificate verifying either the existence
+ * or nonexistence of a node with the given index. */
+struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
+                              const struct iomt *tree,
+                              uint64_t idx,
+                              hash_t *hmac_out);
+
 /* Fill out a user_request struct to create a file with the index
  * given in file_node->idx with the user added with level 3 access in
  * the ACL. */

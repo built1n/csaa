@@ -9,6 +9,9 @@
 /* return true iff [b, bprime] encloses a */
 bool encloses(uint64_t b, uint64_t bprime, uint64_t a)
 {
+    /* zero is not allowed as an index */
+    if(a == 0)
+        return false;
     return (b < a && a < bprime) || (bprime <= b && b < a) || (a < bprime && bprime <= b);
 }
 
@@ -137,7 +140,7 @@ int bintree_sibling(int idx)
  * function will additionally allocate an array of `logleaves' *
  * sizeof(int) with each element representing whether each
  * complementary node is a left or right child. */
-int *merkle_complement(int leafidx, int logleaves, int **orders)
+int *bintree_complement(int leafidx, int logleaves, int **orders)
 {
     int *comp = calloc(logleaves, sizeof(int));
     if(orders)
@@ -163,7 +166,15 @@ int *merkle_complement(int leafidx, int logleaves, int **orders)
     return comp;
 }
 
-int *merkle_dependents(int leafidx, int logleaves)
+hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders)
+{
+    int *compidx = bintree_complement(leafidx, tree->mt_logleaves, orders);
+    hash_t *comp = lookup_nodes(tree->mt_nodes, compidx, tree->mt_logleaves);
+    free(compidx);
+    return comp;
+}
+
+int *bintree_ancestors(int leafidx, int logleaves)
 {
     int *dep = calloc(logleaves, sizeof(int));
 
@@ -178,10 +189,10 @@ int *merkle_dependents(int leafidx, int logleaves)
 }
 
 /* Shim to get only the orders */
-int *merkle_complement_ordersonly(int leafidx, int logleaves)
+int *bintree_complement_ordersonly(int leafidx, int logleaves)
 {
     int *orders;
-    free(merkle_complement(leafidx, logleaves, &orders));
+    free(bintree_complement(leafidx, logleaves, &orders));
     return orders;
 }
 
@@ -237,7 +248,7 @@ void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int 
 /* Update mt_nodes to reflect a change to a leaf node's
  * value. Optionally, if old_dep is not NULL, *old_dep will be made to
  * point to an array of length mt_logleaves that contains the old node
- * values (whose indices are returned by merkle_dependents()). */
+ * values (whose indices are returned by bintree_ancestors()). */
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep)
 {
     if(old_dep)
@@ -264,7 +275,7 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
 }
 
 /* find a node with given idx */
-struct iomt_node *lookup_leaf(struct iomt *tree, uint64_t idx)
+struct iomt_node *iomt_find_leaf(struct iomt *tree, uint64_t idx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
         if(idx == tree->mt_leaves[i].idx)
@@ -272,10 +283,29 @@ struct iomt_node *lookup_leaf(struct iomt *tree, uint64_t idx)
     return NULL;
 }
 
+struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx)
+{
+    for(int i = 0; i < tree->mt_leafcount; ++i)
+        if(encloses(tree->mt_leaves[i].idx, tree->mt_leaves[i].next_idx, idx))
+            return tree->mt_leaves + i;
+    return NULL;
+}
+
+struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx)
+{
+    for(int i = 0; i < tree->mt_leafcount; ++i)
+    {
+        if(tree->mt_leaves[i].idx == idx ||
+           encloses(tree->mt_leaves[i].idx, tree->mt_leaves[i].next_idx, idx))
+            return tree->mt_leaves + i;
+    }
+    return NULL;
+}
+
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
 {
     /* update the leaf first, then use merkle_update */
-    struct iomt_node *leaf = lookup_leaf(tree, idx);
+    struct iomt_node *leaf = iomt_find_leaf(tree, idx);
     leaf->val = newval;
 
     merkle_update(tree, idx, hash_node(leaf), NULL);
@@ -350,14 +380,14 @@ hash_t u64_to_hash(uint64_t n)
 void crypto_test(void)
 {
     int *orders;
-    int *comp = merkle_complement(6, 4, &orders);
+    int *comp = bintree_complement(6, 4, &orders);
     int correct[] = { 22, 9, 3, 2 };
     int correct_orders[] = { 1, 0, 0, 1 };
     check("Complement calculation", !memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
     free(orders);
     free(comp);
 
-    int *dep = merkle_dependents(6, 4);
+    int *dep = bintree_ancestors(6, 4);
     int correct_dep[] = { 10, 4, 1, 0 };
     check("Dependency calculation", !memcmp(dep, correct_dep, 4 * sizeof(int)));
     free(dep);

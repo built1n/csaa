@@ -68,12 +68,14 @@ hash_t merkle_parent(hash_t u, hash_t v, int order);
  * function will additionally allocate an array of `logleaves' *
  * sizeof(int) with each element representing whether each
  * complementary node is a left or right child. */
-int *merkle_complement(int leafidx, int logleaves, int **orders);
-int *merkle_complement_ordersonly(int leafidx, int logleaves);
+int *bintree_complement(int leafidx, int logleaves, int **orders);
+int *bintree_complement_ordersonly(int leafidx, int logleaves);
 
 /* Return an array of indices of tree nodes that are dependent on a
  * given leaf node. Will be ordered from nearest relative to root. */
-int *merkle_dependents(int leafidx, int logleaves);
+int *bintree_ancestors(int leafidx, int logleaves);
+
+hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders);
 
 hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n);
 void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n);
@@ -84,11 +86,16 @@ void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int 
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep);
 
 struct iomt *iomt_new(int logleaves);
+void iomt_free(struct iomt *tree);
+
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
 void iomt_fill(struct iomt *tree);
 void iomt_dump(struct iomt *tree);
-struct iomt_node *lookup_leaf(struct iomt *tree, uint64_t idx);
-void iomt_free(struct iomt *tree);
+
+/* All linear searches... slow! */
+struct iomt_node *iomt_find_leaf(struct iomt *tree, uint64_t idx);
+struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx);
+struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx);
 
 int bintree_parent(int idx);
 int bintree_sibling(int idx);

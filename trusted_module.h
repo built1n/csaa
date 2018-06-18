@@ -195,13 +195,14 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           hash_t secret, hash_t kf);
 
 struct version_info tm_verify_file(const struct trusted_module *tm,
+                                   uint64_t user_id,
                                    const struct tm_cert *rv1, hash_t rv1_hmac,
                                    const struct tm_cert *rv2, hash_t rv2_hmac,
                                    const struct tm_cert *fr, hash_t fr_hmac,
                                    const struct tm_cert *vr, hash_t vr_hmac,
                                    hash_t *response_hmac);
 
-hash_t ack_sign(const struct user_request *req, const void *key, size_t keylen);
+hash_t ack_sign(const struct user_request *req, int nzeros, const void *key, size_t keylen);
 
 const char *tm_geterror(void);
 

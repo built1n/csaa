@@ -36,6 +36,21 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                   const void *encrypted_file, size_t filelen,
                                   hash_t *ack_hmac);
 
+/* Retrieve authenticated information on a version of a file; if
+ * version is zero, default to the latest version. */
+struct version_info sp_fileinfo(struct service_provider *sp,
+                                uint64_t user_id, uint64_t file_id,
+                                uint64_t version,
+                                hash_t *hmac);
+
+/* Again, version=0 selects the latest version. */
+const void *sp_retrievefile(struct service_provider *sp,
+                            uint64_t user_id,
+                            uint64_t file_id,
+                            uint64_t version,
+                            size_t *len,
+                            hash_t *encrypted_key);
+
 void sp_test(void);
 
 #endif
