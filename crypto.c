@@ -63,12 +63,6 @@ hash_t hash_xor(hash_t a, hash_t b)
     return a;
 }
 
-void hash_zero(hash_t *h)
-{
-    for(int i = 0; i < 32; ++i)
-        h->hash[i] = 0;
-}
-
 /* NOTE: we fail to distinguish between intermediate and leaf
  * nodes, making a second-preimage attack possible */
 /* order: 0: u is left, v is right, 1: u is right, v is left */
@@ -275,7 +269,7 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
 }
 
 /* find a node with given idx */
-struct iomt_node *iomt_find_leaf(struct iomt *tree, uint64_t idx)
+struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
         if(idx == tree->mt_leaves[i].idx)
@@ -308,7 +302,18 @@ void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
     struct iomt_node *leaf = iomt_find_leaf(tree, idx);
     leaf->val = newval;
 
-    merkle_update(tree, idx, hash_node(leaf), NULL);
+    merkle_update(tree, leaf - tree->mt_leaves, hash_node(leaf), NULL);
+}
+
+void iomt_update_by_leafidx(struct iomt *tree, uint64_t leafidx,
+                            uint64_t new_idx, uint64_t new_next_idx, hash_t new_val)
+{
+    struct iomt_node *leaf = tree->mt_leaves + leafidx;
+    leaf->idx = new_idx;
+    leaf->next_idx = new_next_idx;
+    leaf->val = new_val;
+
+    merkle_update(tree, leafidx, hash_node(leaf), NULL);
 }
 
 /* Create a merkle tree with 2^logleaves leaves, each initialized to a
@@ -323,6 +328,21 @@ struct iomt *iomt_new(int logleaves)
     tree->mt_nodes = calloc(2 * tree->mt_leafcount - 1, sizeof(hash_t));
 
     return tree;
+}
+
+struct iomt *iomt_dup(const struct iomt *tree)
+{
+    struct iomt *newtree = calloc(1, sizeof(struct iomt));
+    newtree->mt_leafcount = tree->mt_leafcount;
+    newtree->mt_logleaves = tree->mt_logleaves;
+
+    newtree->mt_leaves = calloc(tree->mt_leafcount, sizeof(struct iomt_node));
+    memcpy(newtree->mt_leaves, tree->mt_leaves, tree->mt_leafcount * sizeof(struct iomt_node));
+
+    newtree->mt_nodes = calloc(2 * tree->mt_leafcount - 1, sizeof(hash_t));
+    memcpy(newtree->mt_nodes, tree->mt_nodes, (2 * tree->mt_leafcount - 1) * sizeof(hash_t));
+
+    return newtree;
 }
 
 void iomt_free(struct iomt *tree)
@@ -345,7 +365,7 @@ struct hashstring hash_format(hash_t h, int n)
     return ret;
 }
 
-void iomt_dump(struct iomt *tree)
+void iomt_dump(const struct iomt *tree)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
     {
@@ -377,6 +397,27 @@ hash_t u64_to_hash(uint64_t n)
     return ret;
 }
 
+/* simple XOR cipher, so encryption and decryption are symmetric */
+hash_t crypt_secret(hash_t encrypted_secret,
+                    uint64_t file_idx, uint64_t file_counter,
+                    const void *key, size_t keylen)
+{
+    hash_t pad; /* key = encrypted_secret ^ pad */
+    HMAC_CTX *ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx,
+                 key, keylen,
+                 EVP_sha256(), NULL);
+
+    /* potential endianness issue */
+    HMAC_Update(ctx, (const unsigned char*)&file_idx, sizeof(file_idx));
+    HMAC_Update(ctx, (const unsigned char*)&file_counter, sizeof(file_counter));
+
+    HMAC_Final(ctx, pad.hash, NULL);
+    HMAC_CTX_free(ctx);
+
+    return hash_xor(encrypted_secret, pad);
+}
+
 void crypto_test(void)
 {
     int *orders;
@@ -391,4 +432,38 @@ void crypto_test(void)
     int correct_dep[] = { 10, 4, 1, 0 };
     check("Dependency calculation", !memcmp(dep, correct_dep, 4 * sizeof(int)));
     free(dep);
+
+    {
+        /* test merkle tree with zeros */
+        hash_t zero1, zero2;
+        memset(zero1.hash, 0, sizeof(zero1.hash));
+        memset(zero2.hash, 0, sizeof(zero2.hash));
+        int orders[] = { 0 };
+
+        /* this should return zero */
+        hash_t res1 = merkle_compute(zero1, &zero2, orders, 1);
+        check("Merkle parent with zeros", is_zero(res1));
+
+        hash_t a = sha256("a", 1);
+        hash_t b = sha256("b", 1);
+        hash_t c = sha256("c", 1);
+        hash_t d = sha256("d", 1);
+        hash_t cd = merkle_parent(c, d, 0);
+        //dump_hash(cd);
+        char buf[64];
+        memcpy(buf, c.hash, 32);
+        memcpy(buf + 32, d.hash, 32);
+        //dump_hash(sha256(buf, 64));
+        check("Merkle parent", hash_equals(sha256(buf, 64), cd));
+
+        hash_t a_comp[] = { b, cd };
+        int a_orders[] = { 1, 1 };
+        hash_t root1 = merkle_compute(a, a_comp, a_orders, 2);
+
+        hash_t ab = merkle_parent(a, b, 0);
+        hash_t root2 = merkle_parent(ab, cd, 0);
+        //dump_hash(root1);
+        //dump_hash(root2);
+        check("Merkle compute", hash_equals(root1, root2));
+    }
 }

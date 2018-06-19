@@ -49,7 +49,6 @@ bool is_zero(hash_t u);
 
 hash_t hash_node(const struct iomt_node *node);
 hash_t hash_xor(hash_t a, hash_t b);
-void hash_zero(hash_t *h);
 
 hash_t sha256(const void *data, size_t datalen);
 hash_t hmac_sha256(const void *data, size_t datalen, const void *key, size_t keylen);
@@ -86,14 +85,17 @@ void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int 
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep);
 
 struct iomt *iomt_new(int logleaves);
+struct iomt *iomt_dup(const struct iomt *tree);
 void iomt_free(struct iomt *tree);
 
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
+void iomt_update_by_leafidx(struct iomt *tree, uint64_t leafidx,
+                            uint64_t new_idx, uint64_t new_next_idx, hash_t new_val);
 void iomt_fill(struct iomt *tree);
-void iomt_dump(struct iomt *tree);
+void iomt_dump(const struct iomt *tree);
 
 /* All linear searches... slow! */
-struct iomt_node *iomt_find_leaf(struct iomt *tree, uint64_t idx);
+struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx);
 struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx);
 struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx);
 
@@ -109,6 +111,10 @@ struct hashstring {
 };
 
 struct hashstring hash_format(hash_t h, int n);
+
+hash_t crypt_secret(hash_t encrypted_secret,
+                    uint64_t file_idx, uint64_t file_counter,
+                    const void *key, size_t keylen);
 
 /* self-test */
 void crypto_test(void);

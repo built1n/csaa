@@ -16,14 +16,13 @@
 
 struct file_version {
     hash_t kf; /* HMAC(key, file_idx) */
-    hash_t l; /* HMAC(h(encrypted contents), kf) */
     hash_t encrypted_secret; /* XOR'd with HMAC(kf, module secret) */
 
     struct tm_cert vr_cert; /* VR certificate */
     hash_t vr_hmac;
 
     void *contents;
-    size_t len;
+    size_t contents_len;
 };
 
 struct file_record {
@@ -45,8 +44,6 @@ struct file_record {
 struct service_provider {
     struct trusted_module *tm;
 
-    /* stored in sorted order; eventually a hash table would be
-     * wise */
     struct file_record *records;
     size_t nrecords;
 
@@ -277,12 +274,12 @@ struct tm_cert sp_request(struct service_provider *sp,
 
         if(req->type == ACL_UPDATE)
         {
+            /* check that the passed value matches the calculated root */
+            assert(hash_equals(req->val, new_acl->mt_nodes[0]));
+
             /* update our ACL */
             iomt_free(rec->acl);
             rec->acl = new_acl;
-
-            /* check that the passed value matches the calculated root */
-            assert(hash_equals(req->val, new_acl->mt_nodes[0]));
         }
 
         if(rec->version != fr.fr.version)
@@ -293,8 +290,6 @@ struct tm_cert sp_request(struct service_provider *sp,
             memset(&ver, 0, sizeof(ver));
 
             hash_t gamma = sha256(encrypted_contents, contents_len);
-            ver.l = hmac_sha256(&gamma, sizeof(gamma),
-                                &kf, sizeof(kf));
 
             if(!is_zero(encrypted_secret) && !is_zero(kf))
             {
@@ -307,7 +302,7 @@ struct tm_cert sp_request(struct service_provider *sp,
 
                 /* We have no way of verifying that kf=HMAC(encryption
                  * secret, file index) ourselves; instead we rely on the
-                 * module to do so for us. */
+                 * module to do so for us, as done above. */
                 ver.kf = kf;
             }
             else
@@ -323,7 +318,7 @@ struct tm_cert sp_request(struct service_provider *sp,
                 /* duplicate */
                 ver.contents = malloc(contents_len);
                 memcpy(ver.contents, encrypted_contents, contents_len);
-                ver.len = contents_len;
+                ver.contents_len = contents_len;
             }
 
             append_version(rec, &ver);
@@ -361,6 +356,8 @@ struct user_request sp_createfile(struct service_provider *sp,
                              hash_t *ack_hmac)
 {
     int i;
+
+    /* Find an empty leaf node */
     for(i = 0; i < sp->iomt->mt_leafcount; ++i)
     {
         if(is_zero(sp->iomt->mt_leaves[i].val))
@@ -406,6 +403,58 @@ struct user_request sp_createfile(struct service_provider *sp,
     return req_null;
 }
 
+/* Expects ACL root to already be calculated */
+struct user_request sp_modifyacl(struct service_provider *sp,
+                                 uint64_t user_id, const void *key, size_t keylen,
+                                 uint64_t file_idx,
+                                 struct iomt *new_acl,
+                                 hash_t *ack_hmac)
+{
+    /* modification */
+    struct file_record *rec = lookup_record(sp, file_idx);
+    if(!rec)
+        return req_null;
+
+    int *file_orders, *acl_orders;
+    struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx);
+
+    hash_t *file_comp = merkle_complement(sp->iomt,
+                                          file_node - sp->iomt->mt_leaves,
+                                          &file_orders);
+
+    struct iomt_node *acl_node = iomt_find_leaf(rec->acl, user_id);
+    hash_t *acl_comp = merkle_complement(rec->acl,
+                                         acl_node - rec->acl->mt_leaves,
+                                         &acl_orders);
+
+    struct user_request req = req_aclmodify(sp->tm,
+                                            &rec->fr_cert, rec->fr_hmac,
+                                            file_node,
+                                            file_comp, file_orders, sp->iomt->mt_logleaves,
+                                            acl_node,
+                                            acl_comp, acl_orders, rec->acl->mt_logleaves,
+                                            new_acl->mt_nodes[0]);
+
+    free(file_comp);
+    free(file_orders);
+    free(acl_comp);
+    free(acl_orders);
+
+    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
+
+    struct tm_cert new_fr = sp_request(sp,
+                                       &req, req_hmac,
+                                       NULL,
+                                       NULL, NULL,
+                                       ack_hmac,
+                                       hash_null, hash_null, NULL, 0,
+                                       new_acl);
+
+    if(new_fr.type == FR)
+        return req;
+    return req_null;
+}
+
 struct user_request sp_modifyfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   uint64_t file_idx,
@@ -418,29 +467,23 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     if(!rec)
         return req_null;
 
+    int *file_orders, *acl_orders;
     struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx);
 
-    /* hack */
-    int leaf_idx = file_node - sp->iomt->mt_leaves;
+    hash_t *file_comp = merkle_complement(sp->iomt,
+                                          file_node - sp->iomt->mt_leaves,
+                                          &file_orders);
 
-    int *file_compidx, *file_orders;
-    file_compidx = bintree_complement(leaf_idx, sp->iomt->mt_logleaves, &file_orders);
-
-    hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
-
-    /* get ACL node and its complement */
     struct iomt_node *acl_node = iomt_find_leaf(rec->acl, user_id);
-    int aclnode_idx = acl_node - rec->acl->mt_leaves;
-    int *acl_orders;
-    int *acl_compidx = bintree_complement(aclnode_idx, rec->acl->mt_logleaves, &acl_orders);
-
-    hash_t *acl_comp = lookup_nodes(rec->acl->mt_nodes, acl_compidx, rec->acl->mt_logleaves);
+    hash_t *acl_comp = merkle_complement(rec->acl,
+                                         acl_node - rec->acl->mt_leaves,
+                                         &acl_orders);
 
     hash_t gamma = sha256(encrypted_file, filelen);
     hash_t lambda = hmac_sha256(&gamma, sizeof(gamma),
                                 &kf, sizeof(kf));
 
-    struct user_request mod = req_filemodify(sp->tm,
+    struct user_request req = req_filemodify(sp->tm,
                                              &rec->fr_cert, rec->fr_hmac,
                                              file_node,
                                              file_comp, file_orders, sp->iomt->mt_logleaves,
@@ -449,18 +492,16 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                              lambda);
     free(file_comp);
     free(acl_comp);
-    free(file_compidx);
-    free(acl_compidx);
     free(file_orders);
     free(acl_orders);
 
-    hash_t req_hmac = hmac_sha256(&mod, sizeof(mod), key, keylen);
+    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
 
     struct tm_cert vr;
     hash_t vr_hmac, fr_hmac;
 
     struct tm_cert new_fr = sp_request(sp,
-                                       &mod, req_hmac,
+                                       &req, req_hmac,
                                        &fr_hmac,
                                        &vr, &vr_hmac,
                                        ack_hmac,
@@ -471,7 +512,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     /* We return the request because that is how the module's
      * authentication is done. */
     if(new_fr.type == FR)
-        return mod;
+        return req;
     return req_null;
 }
 
@@ -582,6 +623,61 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                           hmac);
 }
 
+/* This file retrieves the file given by file_idx for a given
+ * user. *encrypted_secret will be set to the encryption key XOR'd
+ * with HMAC(f | c_f, K). The returned value is dynamically allocated
+ * and must be freed by the caller. This function returns NULL upon
+ * failure. An authenticated proof that the request cannot be
+ * satisfied can be obtained by calling sp_fileinfo. */
+void *sp_retrieve_file(struct service_provider *sp,
+                       uint64_t user_id,
+                       uint64_t file_idx,
+                       uint64_t version,
+                       hash_t *encrypted_secret,
+                       size_t *len)
+{
+    struct file_record *rec = lookup_record(sp, file_idx);
+
+    if(!rec->nversions)
+    {
+        /* Newly created file, no contents. We don't bother to set
+         * *encrypted_secret or *len. */
+        return NULL;
+    }
+
+    struct file_version *ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
+
+    hash_t rv1_hmac, rv2_hmac;
+    struct tm_cert rv1 = cert_rv_by_idx(sp->tm, sp->iomt, file_idx, &rv1_hmac);
+    struct tm_cert rv2 = cert_rv_by_idx(sp->tm, rec->acl, user_id, &rv2_hmac);
+
+    if(hash_to_u64(rv2.rv.val) < 1)
+    {
+        /* no permissions; don't return file contents */
+        return NULL;
+    }
+
+    if(encrypted_secret)
+    {
+        *encrypted_secret = is_zero(ver->encrypted_secret) ?
+            hash_null                                      :
+            tm_retrieve_secret(sp->tm,
+                               &rv1, rv1_hmac,
+                               &rv2, rv2_hmac,
+                               &rec->fr_cert, rec->fr_hmac,
+                               ver->encrypted_secret, ver->kf);
+    }
+
+    if(len)
+        *len = ver->contents_len;
+
+    /* duplicate */
+    void *ret = malloc(ver->contents_len);
+    memcpy(ret, ver->contents, ver->contents_len);
+
+    return ret;
+}
+
 #include <time.h>
 
 void sp_test(void)
@@ -596,22 +692,24 @@ void sp_test(void)
 
     check("Tree initialization", sp != NULL);
 
-    hash_t ack_hmac;
-    struct user_request req = sp_createfile(sp, 1, "a", 1, &ack_hmac);
+    {
+        hash_t ack_hmac;
+        struct user_request req = sp_createfile(sp, 1, "a", 1, &ack_hmac);
 
-    check("File creation", ack_verify(&req, "a", 1, ack_hmac));
+        check("File creation", ack_verify(&req, "a", 1, ack_hmac));
 
-#define N_MODIFY 10000
-    start = clock();
-    for(int i = 0; i < N_MODIFY; ++i)
-        req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, "contents", 8, &ack_hmac);
+#define N_MODIFY 100
+        start = clock();
+        for(int i = 0; i < N_MODIFY; ++i)
+            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, "contents", 8, &ack_hmac);
 
-    stop = clock();
-    printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
+        stop = clock();
+        printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
-    check("File modification", ack_verify(&req, "a", 1, ack_hmac));
+        check("File modification", ack_verify(&req, "a", 1, ack_hmac));
+    }
 
-    /* test retrieval */
+    /* file info retrieval */
     {
         hash_t hmac;
         /* check inside range, but empty slot */
@@ -637,6 +735,46 @@ void sp_test(void)
 
         struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, lambda };
         check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
+    }
+
+    /* retrieve contents */
+    {
+        hash_t key;
+        size_t len;
+        void *contents = sp_retrieve_file(sp,
+                                          1,
+                                          1,
+                                          1,
+                                          &key,
+                                          &len);
+        check("File retrieval 1", !memcmp(contents, "contents", 8) && len == 8);
+        free(contents);
+    }
+
+    {
+        /* ACL modify */
+        struct iomt *newacl = iomt_new(ACL_LOGLEAVES);
+        iomt_update_by_leafidx(newacl, 0, 1, 2, u64_to_hash(3));
+        iomt_update_by_leafidx(newacl, 1, 2, 1, u64_to_hash(1));
+
+        hash_t ack;
+        bool success = true;
+
+#define N_ACLMODIFY 100
+        for(int i = 0; i < 100; ++i)
+        {
+            struct user_request req = sp_modifyacl(sp,
+                                                   1, "a", 1,
+                                                   1,
+                                                   iomt_dup(newacl),
+                                                   &ack);
+
+            success &= ack_verify(&req, "a", 1, ack);
+        }
+
+        iomt_free(newacl);
+
+        check("ACL modification 1", success);
     }
 
     if(logleaves < 5)

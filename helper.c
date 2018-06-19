@@ -177,7 +177,7 @@ struct user_request req_aclmodify(const struct trusted_module *tm,
                                   const hash_t *oldacl_comp, const int *oldacl_orders, size_t oldacl_n,
                                   hash_t newacl_root)
 {
-    struct user_request req;
+    struct user_request req = req_null;
     req.type = ACL_UPDATE;
 
     req.idx = file_node->idx;

@@ -192,7 +192,7 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           const struct tm_cert *rv1, hash_t rv1_hmac,
                           const struct tm_cert *rv2, hash_t rv2_hmac,
                           const struct tm_cert *fr, hash_t fr_hmac,
-                          hash_t secret, hash_t kf);
+                          hash_t encrypted_secret, hash_t kf);
 
 struct version_info tm_verify_file(const struct trusted_module *tm,
                                    uint64_t user_id,

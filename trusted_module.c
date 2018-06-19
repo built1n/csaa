@@ -699,11 +699,11 @@ struct tm_cert tm_request(struct trusted_module *tm,
 }
 
 /* enc_secret is encrypted by the user by XOR'ing the file encryption
- * key with h(f + c_f + K), where + denotes concatenation. The purpose
- * of this function is to decrypt the secret passed by the user,
- * verify its integrity against kf=HMAC(secret, key=f_idx), and then
- * re-encrypt the secret with the module's secret key. This is the
- * F_rs() function described by Mohanty et al. */
+ * key with HMAC(f | c_f, K), where | denotes concatenation. The
+ * purpose of this function is to decrypt the secret passed by the
+ * user, verify its integrity against kf=HMAC(secret, key=f_idx), and
+ * then re-encrypt the secret with the module's secret key. This is
+ * the F_rs() function described by Mohanty et al. */
 
 /* Untested. */
 hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
@@ -712,26 +712,17 @@ hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t user_id,
                                     hash_t encrypted_secret, hash_t kf)
 {
-    hash_t pad; /* key = encrypted_secret ^ pad */
-    HMAC_CTX *ctx = HMAC_CTX_new();
-    HMAC_Init_ex(ctx, tm->user_keys[user_id - 1].key, tm->user_keys[user_id - 1].len,
-                 EVP_sha256(), NULL);
+    hash_t key = crypt_secret(encrypted_secret,
+                              file_idx, file_counter,
+                              tm->user_keys[user_id - 1].key,
+                              tm->user_keys[user_id - 1].len);
 
-    HMAC_Update(ctx, (const unsigned char*)&file_idx, sizeof(file_idx));
-    HMAC_Update(ctx, (const unsigned char*)&file_counter, sizeof(file_counter));
-
-    HMAC_Final(ctx, pad.hash, NULL);
-    HMAC_CTX_free(ctx);
-
-    hash_t key = hash_xor(encrypted_secret, pad);
-
-    if(hash_equals(kf,
-                   hmac_sha256(key.hash, sizeof(key.hash),
-                               &file_idx, sizeof(file_idx))))
+    if(hash_equals(kf, hmac_sha256(key.hash, sizeof(key.hash),
+                                   &file_idx, sizeof(file_idx))))
     {
-        /* re-encrypt */
-        pad = hmac_sha256(kf.hash, sizeof(kf.hash),
-                          tm->secret, sizeof(tm->secret));
+        /* re-encrypt using key known only to module */
+        hash_t pad = hmac_sha256(kf.hash, sizeof(kf.hash),
+                                 tm->secret, sizeof(tm->secret));
 
         return hash_xor(key, pad);
     }
@@ -968,39 +959,6 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
 /* self-test */
 void tm_test(void)
 {
-    {
-        /* test merkle tree with zeros */
-        hash_t zero1, zero2;
-        memset(zero1.hash, 0, sizeof(zero1.hash));
-        memset(zero2.hash, 0, sizeof(zero2.hash));
-        int orders[] = { 0 };
-
-        /* this should return zero */
-        hash_t res1 = merkle_compute(zero1, &zero2, orders, 1);
-        check("Merkle parent with zeros", is_zero(res1));
-
-        hash_t a = sha256("a", 1);
-        hash_t b = sha256("b", 1);
-        hash_t c = sha256("c", 1);
-        hash_t d = sha256("d", 1);
-        hash_t cd = merkle_parent(c, d, 0);
-        //dump_hash(cd);
-        char buf[64];
-        memcpy(buf, c.hash, 32);
-        memcpy(buf + 32, d.hash, 32);
-        //dump_hash(sha256(buf, 64));
-        check("Merkle parent", hash_equals(sha256(buf, 64), cd));
-
-        hash_t a_comp[] = { b, cd };
-        int a_orders[] = { 1, 1 };
-        hash_t root1 = merkle_compute(a, a_comp, a_orders, 2);
-
-        hash_t ab = merkle_parent(a, b, 0);
-        hash_t root2 = merkle_parent(ab, cd, 0);
-        //dump_hash(root1);
-        //dump_hash(root2);
-        check("Merkle compute", hash_equals(root1, root2));
-    }
 
     {
         /* check NU certificate generation */
@@ -1041,9 +999,5 @@ void tm_test(void)
               cert_verify(tm, &cat, hmac_cat));
 
         tm_free(tm);
-    }
-
-    {
-
     }
 }

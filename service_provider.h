@@ -29,6 +29,12 @@ struct user_request sp_createfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   hash_t *ack_hmac);
 
+struct user_request sp_modifyacl(struct service_provider *sp,
+                                 uint64_t user_id, const void *key, size_t keylen,
+                                 uint64_t file_idx,
+                                 struct iomt *new_acl,
+                                 hash_t *ack_hmac);
+
 struct user_request sp_modifyfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   uint64_t file_idx,
@@ -44,12 +50,12 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                 hash_t *hmac);
 
 /* Again, version=0 selects the latest version. */
-const void *sp_retrievefile(struct service_provider *sp,
-                            uint64_t user_id,
-                            uint64_t file_id,
-                            uint64_t version,
-                            size_t *len,
-                            hash_t *encrypted_key);
+void *sp_retrieve_file(struct service_provider *sp,
+                       uint64_t user_id,
+                       uint64_t file_idx,
+                       uint64_t version,
+                       hash_t *encrypted_secret,
+                       size_t *len);
 
 void sp_test(void);
 

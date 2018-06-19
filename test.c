@@ -15,7 +15,7 @@ void check(const char *name, int condition)
 
 int main()
 {
+    crypto_test();
     tm_test();
     sp_test();
-    crypto_test();
 }
