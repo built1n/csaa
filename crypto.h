@@ -116,6 +116,8 @@ hash_t crypt_secret(hash_t encrypted_secret,
                     uint64_t file_idx, uint64_t file_counter,
                     const void *key, size_t keylen);
 
+hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf);
+
 /* self-test */
 void crypto_test(void);
 #endif

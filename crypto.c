@@ -418,6 +418,31 @@ hash_t crypt_secret(hash_t encrypted_secret,
     return hash_xor(encrypted_secret, pad);
 }
 
+/* These are all fixed-length fields, so we can safely append them and
+ * forgo any HMAC. */
+hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf)
+{
+    hash_t buildcode_root = hash_null, composefile_root = hash_null;
+    if(buildcode)
+        buildcode_root = buildcode->mt_nodes[0];
+    if(composefile)
+        composefile_root = composefile->mt_nodes[0];
+
+    SHA256_CTX ctx;
+    hash_t h;
+
+    SHA256_Init(&ctx);
+
+    SHA256_Update(&ctx, gamma.hash, sizeof(gamma.hash));
+    SHA256_Update(&ctx, buildcode_root.hash, sizeof(buildcode_root.hash));
+    SHA256_Update(&ctx, composefile_root.hash, sizeof(composefile_root.hash));
+    SHA256_Update(&ctx, kf.hash, sizeof(kf.hash));
+
+    SHA256_Final(h.hash, &ctx);
+
+    return h;
+}
+
 void crypto_test(void)
 {
     int *orders;

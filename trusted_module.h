@@ -43,8 +43,9 @@ struct tm_cert {
         struct {
             uint64_t idx;
             uint64_t version;
-            hash_t hash; /* lambda value: the commitment to contents,
-                          * key, and index */
+            hash_t hash; /* lambda value: the commitment to build code
+                          * ACL root, stack file ACL root, container
+                          * image, key, and index */
         } vr; /* version record (of a file) */
     };
 };

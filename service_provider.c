@@ -21,6 +21,13 @@ struct file_version {
     struct tm_cert vr_cert; /* VR certificate */
     hash_t vr_hmac;
 
+    /* lines of Dockerfile */
+    struct iomt *buildcode;
+
+    /* lines of docker-compose.yml */
+    struct iomt *composefile;
+
+    /* image .tar file */
     void *contents;
     size_t contents_len;
 };
@@ -109,7 +116,7 @@ struct tm_cert cert_eq(struct service_provider *sp,
 
     /* restore the tree */
     int *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
-    restore_nodes(sp->iomt->mt_nodes,  dep_indices, old_depvalues, sp->iomt->mt_logleaves);
+    restore_nodes(sp->iomt->mt_nodes, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
     free(dep_indices);
     free(old_depvalues);
 
@@ -230,10 +237,11 @@ static void append_version(struct file_record *rec, const struct file_version *v
  * indicates concatenation) is output in *ack_hmac_out.
  *
  * If the request is to modify the file, the parameters
- * encrypted_secret, kf, encrypted_contents, and contents_len are used
- * (otherwise they are ignored). `encrypted_secret' should be the file
- * encryption key XOR'd with HMAC(file index | file counter,
- * user_key). kf should be HMAC(encryption secret, file index).
+ * encrypted_secret, kf, buildcode, composefile, encrypted_contents,
+ * and contents_len are used (otherwise they are
+ * ignored). `encrypted_secret' should be the file encryption key
+ * XOR'd with HMAC(file index | file counter, user_key). kf should be
+ * HMAC(encryption secret, file index).
  *
  * If the request is to either modify the ACL or create a file (which
  * is essentially an ACL update), the ACL will be set to
@@ -245,8 +253,9 @@ struct tm_cert sp_request(struct service_provider *sp,
                           struct tm_cert *vr_out, hash_t *vr_hmac_out,
                           hash_t *ack_hmac_out,
                           hash_t encrypted_secret, hash_t kf,
+                          const struct iomt *buildcode, const struct iomt *composefile,
                           const void *encrypted_contents, size_t contents_len,
-                          struct iomt *new_acl)
+                          const struct iomt *new_acl)
 {
     struct tm_cert vr = cert_null;
     hash_t vr_hmac, ack_hmac, fr_hmac;
@@ -279,7 +288,7 @@ struct tm_cert sp_request(struct service_provider *sp,
 
             /* update our ACL */
             iomt_free(rec->acl);
-            rec->acl = new_acl;
+            rec->acl = iomt_dup(new_acl);
         }
 
         if(rec->version != fr.fr.version)
@@ -312,6 +321,12 @@ struct tm_cert sp_request(struct service_provider *sp,
 
             ver.vr_cert = vr;
             ver.vr_hmac = vr_hmac;
+
+            if(buildcode)
+                ver.buildcode = iomt_dup(buildcode);
+
+            if(composefile)
+                ver.composefile = iomt_dup(composefile);
 
             if(encrypted_contents)
             {
@@ -392,8 +407,13 @@ struct user_request sp_createfile(struct service_provider *sp,
                                         &fr_hmac,
                                         NULL, NULL,
                                         ack_hmac,
-                                        hash_null, hash_null, NULL, 0,
+                                        hash_null, hash_null,
+                                        NULL, NULL,
+                                        NULL, 0,
                                         acl);
+
+    iomt_free(acl);
+
     free(file_compidx);
     free(file_comp);
     free(file_orders);
@@ -447,7 +467,9 @@ struct user_request sp_modifyacl(struct service_provider *sp,
                                        NULL,
                                        NULL, NULL,
                                        ack_hmac,
-                                       hash_null, hash_null, NULL, 0,
+                                       hash_null, hash_null,
+                                       NULL, NULL,
+                                       NULL, 0,
                                        new_acl);
 
     if(new_fr.type == FR)
@@ -459,6 +481,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                   uint64_t user_id, const void *key, size_t keylen,
                                   uint64_t file_idx,
                                   hash_t encrypted_secret, hash_t kf,
+                                  const struct iomt *buildcode, const struct iomt *composefile,
                                   const void *encrypted_file, size_t filelen,
                                   hash_t *ack_hmac)
 {
@@ -480,8 +503,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                          &acl_orders);
 
     hash_t gamma = sha256(encrypted_file, filelen);
-    hash_t lambda = hmac_sha256(&gamma, sizeof(gamma),
-                                &kf, sizeof(kf));
+    hash_t lambda = calc_lambda(gamma, buildcode, composefile, kf);
 
     struct user_request req = req_filemodify(sp->tm,
                                              &rec->fr_cert, rec->fr_hmac,
@@ -506,6 +528,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
                                        &vr, &vr_hmac,
                                        ack_hmac,
                                        encrypted_secret, kf,
+                                       buildcode, composefile,
                                        encrypted_file, filelen,
                                        NULL);
 
@@ -701,7 +724,7 @@ void sp_test(void)
 #define N_MODIFY 100
         start = clock();
         for(int i = 0; i < N_MODIFY; ++i)
-            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, "contents", 8, &ack_hmac);
+            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, NULL, NULL, "contents", 8, &ack_hmac);
 
         stop = clock();
         printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
@@ -730,8 +753,7 @@ void sp_test(void)
 
         hash_t gamma = sha256("contents", 8);
         hash_t kf = hash_null;
-        hash_t lambda = hmac_sha256(&gamma, sizeof(gamma),
-                                    &kf, sizeof(kf));
+        hash_t lambda = calc_lambda(gamma, NULL, NULL, kf);
 
         struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, lambda };
         check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
@@ -766,7 +788,7 @@ void sp_test(void)
             struct user_request req = sp_modifyacl(sp,
                                                    1, "a", 1,
                                                    1,
-                                                   iomt_dup(newacl),
+                                                   newacl,
                                                    &ack);
 
             success &= ack_verify(&req, "a", 1, ack);
