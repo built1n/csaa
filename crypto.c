@@ -242,7 +242,9 @@ void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int 
 /* Update mt_nodes to reflect a change to a leaf node's
  * value. Optionally, if old_dep is not NULL, *old_dep will be made to
  * point to an array of length mt_logleaves that contains the old node
- * values (whose indices are returned by bintree_ancestors()). */
+ * values (whose indices are returned by bintree_ancestors()). NOTE:
+ * this function will NOT set the corresponding IOMT leaf; use
+ * iomt_update_by_leafidx for that. */
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep)
 {
     if(old_dep)

@@ -12,6 +12,7 @@
 #include "test.h"
 #include "trusted_module.h"
 
+/* arbitrary */
 #define ACL_LOGLEAVES 4
 
 struct file_version {
@@ -89,52 +90,62 @@ struct tm_cert cert_eq(struct service_provider *sp,
 
     hash_t h_ins = hash_node(&insert);
 
-    int *orders_enc, *orders_ins;
-    int *compidx_enc = bintree_complement(encloser_leafidx, sp->iomt->mt_logleaves, &orders_enc);
-    int *compidx_ins = bintree_complement(placeholder_leafidx, sp->iomt->mt_logleaves, &orders_ins);
-
-    hash_t *comp_enc = lookup_nodes(sp->iomt->mt_nodes, compidx_enc, sp->iomt->mt_logleaves);
+    int *enc_orders;
+    hash_t *enc_comp = merkle_complement(sp->iomt, encloser_leafidx, &enc_orders);
 
     /* we need two NU certificates */
     hash_t nu1_hmac, nu2_hmac;
 
     struct tm_cert nu1 = tm_cert_node_update(sp->tm,
                                              h_enc, h_encmod,
-                                             comp_enc, orders_enc, sp->iomt->mt_logleaves,
+                                             enc_comp, enc_orders, sp->iomt->mt_logleaves,
                                              &nu1_hmac);
 
     /* We now update the ancestors of the encloser node. */
     hash_t *old_depvalues;
     merkle_update(sp->iomt, encloser_leafidx, h_encmod, &old_depvalues);
 
-    hash_t *comp_ins = lookup_nodes(sp->iomt->mt_nodes, compidx_ins, sp->iomt->mt_logleaves);
+    int *ins_orders;
+    hash_t *ins_comp = merkle_complement(sp->iomt, placeholder_leafidx, &ins_orders);
 
     struct tm_cert nu2 = tm_cert_node_update(sp->tm,
                                              hash_null, h_ins,
-                                             comp_ins, orders_ins, sp->iomt->mt_logleaves,
+                                             ins_comp, ins_orders, sp->iomt->mt_logleaves,
                                              &nu2_hmac);
 
     /* restore the tree */
     int *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt->mt_nodes, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
+
     free(dep_indices);
     free(old_depvalues);
 
-    free(compidx_enc);
-    free(compidx_ins);
-    free(comp_enc);
-    free(comp_ins);
-    free(orders_enc);
-    free(orders_ins);
+    free(enc_comp);
+    free(ins_comp);
+    free(enc_orders);
+    free(ins_orders);
 
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
 }
+
+#if 0
+void *db_init(const char *filename)
+{
+    sqlite3 *db;
+    if(sqlite3_open(filename, &db) != SQLITE_OK)
+        return null;
+
+    return db;
+}
+#endif
 
 /* leaf count will be 2^logleaves */
 struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 {
     assert(logleaves > 0);
     struct service_provider *sp = calloc(1, sizeof(*sp));
+
+    //sp->db = db_init("csaa.db");
 
     sp->tm = tm_new(key, keylen);
 
@@ -145,8 +156,9 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
      * insert our desired number of nodes by using EQ certificates to
      * update the internal IOMT root. Note that leaf indices are
      * 1-indexed. */
-    sp->iomt->mt_leaves[0] = (struct iomt_node) { 1, 1, hash_null };
-    merkle_update(sp->iomt, 0, hash_node(sp->iomt->mt_leaves + 0), NULL);
+    iomt_update_by_leafidx(sp->iomt,
+                           0,
+                           1, 1, hash_null);
 
     for(int i = 1; i < sp->iomt->mt_leafcount; ++i)
     {
@@ -213,10 +225,9 @@ static struct file_record *lookup_record(struct service_provider *sp, int idx)
 }
 
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
- * avoid copying (O(n) lookup, O(1) insertion)? Probably better to use a hash
- * table. */
-/* We do not check to ensure that there are no duplicate file indices;
- * this is up to the caller */
+ * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
+ * be replaced with a SQL backend.  We do not check to ensure that
+ * there are no duplicate file indices; that is up to the caller. */
 static void append_record(struct service_provider *sp, const struct file_record *rec)
 {
     sp->records = realloc(sp->records, sizeof(struct file_record) * ++sp->nrecords);
@@ -245,8 +256,7 @@ static void append_version(struct file_record *rec, const struct file_version *v
  *
  * If the request is to either modify the ACL or create a file (which
  * is essentially an ACL update), the ACL will be set to
- * new_acl. `new_acl' must be in persistent storage.
- */
+ * new_acl. `new_acl' must be in persistent storage. */
 struct tm_cert sp_request(struct service_provider *sp,
                           const struct user_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
@@ -298,8 +308,6 @@ struct tm_cert sp_request(struct service_provider *sp,
             struct file_version ver;
             memset(&ver, 0, sizeof(ver));
 
-            hash_t gamma = sha256(encrypted_contents, contents_len);
-
             if(!is_zero(encrypted_secret) && !is_zero(kf))
             {
                 /* File is encrypted */
@@ -348,9 +356,7 @@ struct tm_cert sp_request(struct service_provider *sp,
         }
 
         /* update our tree */
-        sp->iomt->mt_leaves[req->idx - 1].val = u64_to_hash(fr.fr.counter);
-
-        merkle_update(sp->iomt, req->idx - 1, hash_node(sp->iomt->mt_leaves + req->idx - 1), NULL);
+        iomt_update(sp->iomt, req->idx, u64_to_hash(fr.fr.counter));
     }
 
     /* return values to caller */
@@ -385,14 +391,13 @@ struct user_request sp_createfile(struct service_provider *sp,
         return req_null;
     }
 
-    int *file_compidx, *file_orders;
-    file_compidx = bintree_complement(i, sp->iomt->mt_logleaves, &file_orders);
-
-    hash_t *file_comp = lookup_nodes(sp->iomt->mt_nodes, file_compidx, sp->iomt->mt_logleaves);
+    int *file_orders;
+    hash_t *file_comp = merkle_complement(sp->iomt, i, &file_orders);
 
     struct iomt *acl = iomt_new(ACL_LOGLEAVES);
-    acl->mt_leaves[0] = (struct iomt_node) { user_id, user_id, u64_to_hash(3) };
-    merkle_update(acl, 0, hash_node(acl->mt_leaves + 0), NULL);
+    iomt_update_by_leafidx(acl,
+                           0,
+                           user_id, user_id, u64_to_hash(3));
 
     struct user_request req = req_filecreate(sp->tm,
                                              i + 1,
@@ -414,7 +419,6 @@ struct user_request sp_createfile(struct service_provider *sp,
 
     iomt_free(acl);
 
-    free(file_compidx);
     free(file_comp);
     free(file_orders);
 

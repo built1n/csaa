@@ -281,7 +281,7 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
     {
         if(encloses(node->idx, node->next_idx, b))
         {
-            memset(nonexist, 0, sizeof(*nonexist));
+            *nonexist = cert_null;
             nonexist->type = RV;
             nonexist->rv.idx = b;
 
@@ -298,8 +298,6 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
 
     /* verify that this node is a child of y */
     struct tm_cert cert = cert_null;
-
-    memset(&cert, 0, sizeof(cert));
 
     cert.type = RV;
     cert.rv.root = nu->nu.orig_root;
@@ -348,7 +346,6 @@ struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
     }
 
     struct tm_cert cert = cert_null;
-    memset(&cert, 0, sizeof(cert));
 
     cert.type = RU;
     cert.ru.idx = node->idx;
@@ -389,7 +386,7 @@ bool tm_set_equiv_root(struct trusted_module *tm,
 }
 
 /* user id is 1-indexed */
-hash_t req_sign(const struct trusted_module *tm, const struct user_request *req, int id)
+static hash_t req_sign(const struct trusted_module *tm, const struct user_request *req, int id)
 {
     return hmac_sha256(req, sizeof(*req), tm->user_keys[id - 1].key, tm->user_keys[id - 1].len);
 }
@@ -959,7 +956,6 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
 /* self-test */
 void tm_test(void)
 {
-
     {
         /* check NU certificate generation */
         struct trusted_module *tm = tm_new("a", 1);
