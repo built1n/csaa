@@ -156,7 +156,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
      * insert our desired number of nodes by using EQ certificates to
      * update the internal IOMT root. Note that leaf indices are
      * 1-indexed. */
-    iomt_update_by_leafidx(sp->iomt,
+    iomt_update_leaf_full(sp->iomt,
                            0,
                            1, 1, hash_null);
 
@@ -171,29 +171,25 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
         assert(eq.type == EQ);
 
         /* update previous leaf's index */
-        sp->iomt->mt_leaves[i - 1].next_idx = i + 1;
-        merkle_update(sp->iomt, i - 1, hash_node(sp->iomt->mt_leaves + i - 1), NULL);
+        iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
 
         /* next_idx is set to 1 to keep everything circularly linked;
          * in the next iteration it will be updated to point to the
          * next node, if any */
-        sp->iomt->mt_leaves[i] = (struct iomt_node) { i + 1, 1, hash_null };
-        merkle_update(sp->iomt, i, hash_node(sp->iomt->mt_leaves + i), NULL);
+        iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
     }
 
-    /* We shouldn't need this; the incremental update_tree() calls
-     * should give the same result. */
-    //fill_tree(sp);
-
-    /* everything else is already zeroed by calloc */
     return sp;
 }
 
 static void free_version(struct file_version *ver)
 {
     free(ver->contents);
+
+    iomt_free(ver->buildcode);
+    iomt_free(ver->composefile);
 }
 
 static void free_record(struct file_record *rec)
@@ -395,7 +391,7 @@ struct user_request sp_createfile(struct service_provider *sp,
     hash_t *file_comp = merkle_complement(sp->iomt, i, &file_orders);
 
     struct iomt *acl = iomt_new(ACL_LOGLEAVES);
-    iomt_update_by_leafidx(acl,
+    iomt_update_leaf_full(acl,
                            0,
                            user_id, user_id, u64_to_hash(3));
 
@@ -725,19 +721,26 @@ void sp_test(void)
 
         check("File creation", ack_verify(&req, "a", 1, ack_hmac));
 
+        /* IOMT generation from file */
+        struct iomt *buildcode = iomt_from_lines("container1/Dockerfile");
+        check("IOMT generation from file 1", buildcode != NULL);
+
+        struct iomt_node node1 = { 1, 2, sha256("line1\n", 6) };
+        struct iomt_node node2 = { 2, 1, sha256("line2", 5) };
+
+        hash_t correct_root = merkle_parent(hash_node(&node1), hash_node(&node2), 0);
+        check("IOMT generation from file 2", hash_equals(buildcode->mt_nodes[0], correct_root));
+
 #define N_MODIFY 100
         start = clock();
         for(int i = 0; i < N_MODIFY; ++i)
-            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, NULL, NULL, "contents", 8, &ack_hmac);
+            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, buildcode, NULL, "contents", 8, &ack_hmac);
 
         stop = clock();
         printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
         check("File modification", ack_verify(&req, "a", 1, ack_hmac));
-    }
 
-    /* file info retrieval */
-    {
         hash_t hmac;
         /* check inside range, but empty slot */
         struct version_info vi = sp_fileinfo(sp, 1, 12, 1, &hmac);
@@ -757,7 +760,7 @@ void sp_test(void)
 
         hash_t gamma = sha256("contents", 8);
         hash_t kf = hash_null;
-        hash_t lambda = calc_lambda(gamma, NULL, NULL, kf);
+        hash_t lambda = calc_lambda(gamma, buildcode, NULL, kf);
 
         struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, lambda };
         check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
@@ -780,8 +783,8 @@ void sp_test(void)
     {
         /* ACL modify */
         struct iomt *newacl = iomt_new(ACL_LOGLEAVES);
-        iomt_update_by_leafidx(newacl, 0, 1, 2, u64_to_hash(3));
-        iomt_update_by_leafidx(newacl, 1, 2, 1, u64_to_hash(1));
+        iomt_update_leaf_full(newacl, 0, 1, 2, u64_to_hash(3));
+        iomt_update_leaf_full(newacl, 1, 2, 1, u64_to_hash(1));
 
         hash_t ack;
         bool success = true;

@@ -88,9 +88,23 @@ struct iomt *iomt_new(int logleaves);
 struct iomt *iomt_dup(const struct iomt *tree);
 void iomt_free(struct iomt *tree);
 
+/* Find a leaf with IOMT index `idx' and change its value, propagating
+ * up the tree. */
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
-void iomt_update_by_leafidx(struct iomt *tree, uint64_t leafidx,
-                            uint64_t new_idx, uint64_t new_next_idx, hash_t new_val);
+
+/* Set all the fields of a leaf node (not an IOMT index!) */
+void iomt_update_leaf_full(struct iomt *tree, uint64_t leafidx,
+                           uint64_t new_idx, uint64_t new_next_idx, hash_t new_val);
+void iomt_update_leaf_idx(struct iomt *tree, uint64_t leafidx,
+                          uint64_t new_idx);
+void iomt_update_leaf_nextidx(struct iomt *tree, uint64_t leafidx,
+                              uint64_t new_next_idx);
+void iomt_update_leaf_hash(struct iomt *tree, uint64_t leafidx,
+                           hash_t new_val);
+
+/* Create an IOMT where the leaves are the hash of file lines */
+struct iomt *iomt_from_lines(const char *filename);
+
 void iomt_fill(struct iomt *tree);
 void iomt_dump(const struct iomt *tree);
 

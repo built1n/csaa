@@ -244,7 +244,7 @@ void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int 
  * point to an array of length mt_logleaves that contains the old node
  * values (whose indices are returned by bintree_ancestors()). NOTE:
  * this function will NOT set the corresponding IOMT leaf; use
- * iomt_update_by_leafidx for that. */
+ * iomt_update_leaf_full for that. */
 void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep)
 {
     if(old_dep)
@@ -307,12 +307,39 @@ void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
     merkle_update(tree, leaf - tree->mt_leaves, hash_node(leaf), NULL);
 }
 
-void iomt_update_by_leafidx(struct iomt *tree, uint64_t leafidx,
-                            uint64_t new_idx, uint64_t new_next_idx, hash_t new_val)
+void iomt_update_leaf_full(struct iomt *tree, uint64_t leafidx,
+                           uint64_t new_idx, uint64_t new_next_idx, hash_t new_val)
 {
     struct iomt_node *leaf = tree->mt_leaves + leafidx;
     leaf->idx = new_idx;
     leaf->next_idx = new_next_idx;
+    leaf->val = new_val;
+
+    merkle_update(tree, leafidx, hash_node(leaf), NULL);
+}
+
+void iomt_update_leaf_idx(struct iomt *tree, uint64_t leafidx,
+                          uint64_t new_idx)
+{
+    struct iomt_node *leaf = tree->mt_leaves + leafidx;
+    leaf->idx = new_idx;
+
+    merkle_update(tree, leafidx, hash_node(leaf), NULL);
+}
+
+void iomt_update_leaf_nextidx(struct iomt *tree, uint64_t leafidx,
+                              uint64_t new_next_idx)
+{
+    struct iomt_node *leaf = tree->mt_leaves + leafidx;
+    leaf->next_idx = new_next_idx;
+
+    merkle_update(tree, leafidx, hash_node(leaf), NULL);
+}
+
+void iomt_update_leaf_hash(struct iomt *tree, uint64_t leafidx,
+                           hash_t new_val)
+{
+    struct iomt_node *leaf = tree->mt_leaves + leafidx;
     leaf->val = new_val;
 
     merkle_update(tree, leafidx, hash_node(leaf), NULL);
@@ -355,6 +382,56 @@ void iomt_free(struct iomt *tree)
         free(tree->mt_leaves);
         free(tree);
     }
+}
+
+/* arbitrary */
+#define FILELINES_LOGLEAVES 10
+
+struct iomt *iomt_from_lines(const char *filename)
+{
+    struct iomt *tree = iomt_new(FILELINES_LOGLEAVES);
+
+    FILE *f = fopen(filename, "r");
+
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+
+    int c;
+    uint64_t line = 0;
+
+    while(c != EOF)
+    {
+        c = fgetc(f);
+
+        char ch = c;
+
+        if(c != EOF)
+            SHA256_Update(&ctx, &ch, sizeof(ch));
+
+        if(ch == '\n' || c == EOF)
+        {
+            hash_t linehash;
+            SHA256_Final(linehash.hash, &ctx);
+
+            /* set this leaf to loop around */
+            iomt_update_leaf_full(tree, line, line + 1, 1, linehash);
+
+            if(line > 0)
+            {
+                /* make previously inserted leaf point to this leaf */
+                iomt_update_leaf_nextidx(tree, line - 1, line + 1);
+            }
+
+            line++;
+
+            /* re-initialize for next line */
+            SHA256_Init(&ctx);
+        }
+    }
+
+    fclose(f);
+
+    return tree;
 }
 
 struct hashstring hash_format(hash_t h, int n)
