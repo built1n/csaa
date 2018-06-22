@@ -8,7 +8,7 @@
 #include "crypto.h"
 
 struct trusted_module;
-struct user_request;
+struct tm_request;
 
 struct tm_cert {
     enum { CERT_NONE = 0, NU, EQ, RV, RU, FR, VR } type;
@@ -50,7 +50,7 @@ struct tm_cert {
     };
 };
 
-struct user_request {
+struct tm_request {
     uint64_t idx; /* file index */
     uint64_t user_id; /* user id */
     enum { REQ_NONE = 0, ACL_UPDATE, FILE_UPDATE } type;
@@ -94,9 +94,11 @@ struct version_info {
     hash_t lambda; /* equal to HMAC(h(encrypted_contents), key=HMAC(key, file_idx)) */
 };
 
-static const struct user_request req_null = { REQ_NONE };
+static const struct tm_request req_null = { REQ_NONE };
 static const struct tm_cert cert_null = { CERT_NONE };
 static const struct version_info verinfo_null = { 0 };
+
+#ifndef CLIENT
 
 /* creates 1 user with given shared secret */
 struct trusted_module *tm_new(const void *key, size_t keylen);
@@ -164,7 +166,7 @@ bool tm_set_equiv_root(struct trusted_module *tm,
 
 /* process a user's request to transform the IOMT in some way */
 struct tm_cert tm_request(struct trusted_module *tm,
-                          const struct user_request *req, hash_t req_hmac,
+                          const struct tm_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
                           struct tm_cert *vr_out, hash_t *vr_hmac,
                           hash_t *ack_hmac);
@@ -203,9 +205,10 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
                                    const struct tm_cert *vr, hash_t vr_hmac,
                                    hash_t *response_hmac);
 
-hash_t ack_sign(const struct user_request *req, int nzeros, const void *key, size_t keylen);
-
 const char *tm_geterror(void);
 
 void tm_seterror(const char *error);
+
+#endif
+
 #endif

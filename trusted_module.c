@@ -386,13 +386,13 @@ bool tm_set_equiv_root(struct trusted_module *tm,
 }
 
 /* user id is 1-indexed */
-static hash_t req_sign(const struct trusted_module *tm, const struct user_request *req, int id)
+static hash_t req_sign(const struct trusted_module *tm, const struct tm_request *req, int id)
 {
     return hmac_sha256(req, sizeof(*req), tm->user_keys[id - 1].key, tm->user_keys[id - 1].len);
 }
 
 /* verify HMAC of user request */
-static bool req_verify(const struct trusted_module *tm, const struct user_request *req, uint64_t id, hash_t hmac)
+static bool req_verify(const struct trusted_module *tm, const struct tm_request *req, uint64_t id, hash_t hmac)
 {
     if(id < 1 || id >= tm->n_users + 1)
         return false;
@@ -400,30 +400,7 @@ static bool req_verify(const struct trusted_module *tm, const struct user_reques
     return hash_equals(calculated, hmac);
 }
 
-/* Generate a signed acknowledgement for successful completion of a
- * request. We append a zero byte to the user request and take the
- * HMAC. */
-hash_t ack_sign(const struct user_request *req, int nzeros, const void *key, size_t keylen)
-{
-    HMAC_CTX *ctx = HMAC_CTX_new();
-    HMAC_Init_ex(ctx,
-                 key, keylen,
-                 EVP_sha256(), NULL);
-
-    HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
-
-    unsigned char zero = 0;
-    for(int i = 0; i < nzeros; ++i)
-        HMAC_Update(ctx, &zero, 1);
-
-    hash_t hmac;
-    HMAC_Final(ctx, hmac.hash, NULL);
-    HMAC_CTX_free(ctx);
-
-    return hmac;
-}
-
-static hash_t req_ack(const struct trusted_module *tm, const struct user_request *req)
+static hash_t req_ack(const struct trusted_module *tm, const struct tm_request *req)
 {
     return ack_sign(req,
                     1,
@@ -435,7 +412,7 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
 /*
  * This function handles all transformations on the IOMT except
  * inserting a placeholder (handled above). The function takes its
- * parameter in the form of a user_request struct, which must be
+ * parameter in the form of a tm_request struct, which must be
  * authenticated or else the function will fail. When a request is
  * successfully completed, *ack_hmac will be updated to the value
  * HMAC(<request> + 1, K), where + denotes concatenation, and K is the
@@ -483,7 +460,7 @@ static hash_t req_ack(const struct trusted_module *tm, const struct user_request
  * be updated to reflect the incremented file counter.
  */
 struct tm_cert tm_request(struct trusted_module *tm,
-                          const struct user_request *req, hash_t req_hmac,
+                          const struct tm_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
                           struct tm_cert *vr_out, hash_t *vr_hmac,
                           hash_t *hmac_ack)

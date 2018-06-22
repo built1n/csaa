@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct tm_request;
+
 /* Various useful cryptographic functions; shared between TM and SP. */
 
 /* we use SHA256 for h() */
@@ -105,6 +107,13 @@ void iomt_update_leaf_hash(struct iomt *tree, uint64_t leafidx,
 /* Create an IOMT where the leaves are the hash of file lines */
 struct iomt *iomt_from_lines(const char *filename);
 
+void iomt_serialize(const struct iomt *tree,
+                    void (*write_fn)(void *userdata, const void *data, size_t len),
+                    void *userdata);
+
+struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t len),
+                              void *userdata);
+
 void iomt_fill(struct iomt *tree);
 void iomt_dump(const struct iomt *tree);
 
@@ -131,6 +140,14 @@ hash_t crypt_secret(hash_t encrypted_secret,
                     const void *key, size_t keylen);
 
 hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf);
+
+/* Generate a signed acknowledgement for successful completion of a
+ * request. We append a zero byte to the user request and take the
+ * HMAC. */
+hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_t keylen);
+bool ack_verify(const struct tm_request *req,
+                const void *secret, size_t secret_len,
+                hash_t hmac);
 
 /* self-test */
 void crypto_test(void);

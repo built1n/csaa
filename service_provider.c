@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "crypto.h"
 #include "helper.h"
@@ -237,7 +241,7 @@ static void append_version(struct file_record *rec, const struct file_version *v
 }
 
 /* This does the majority of the work that actually modifies or
- * creates a file. It expects a filled and signed user_request
+ * creates a file. It expects a filled and signed tm_request
  * structure, req, and will return the resulting FR certificate and
  * its signature in *hmac_out. Additionally, the module's
  * authenticated acknowledgement (equal to HMAC(req | 0), where |
@@ -254,7 +258,7 @@ static void append_version(struct file_record *rec, const struct file_version *v
  * is essentially an ACL update), the ACL will be set to
  * new_acl. `new_acl' must be in persistent storage. */
 struct tm_cert sp_request(struct service_provider *sp,
-                          const struct user_request *req, hash_t req_hmac,
+                          const struct tm_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
                           struct tm_cert *vr_out, hash_t *vr_hmac_out,
                           hash_t *ack_hmac_out,
@@ -368,9 +372,11 @@ struct tm_cert sp_request(struct service_provider *sp,
     return fr;
 }
 
-struct user_request sp_createfile(struct service_provider *sp,
-                             uint64_t user_id, const void *key, size_t keylen,
-                             hash_t *ack_hmac)
+struct tm_request sp_createfile(struct service_provider *sp,
+                                uint64_t user_id,
+                                hash_t (*sign_request)(void *userdata, const struct tm_request *req),
+                                void *userdata,
+                                hash_t *ack_hmac)
 {
     int i;
 
@@ -395,12 +401,12 @@ struct user_request sp_createfile(struct service_provider *sp,
                            0,
                            user_id, user_id, u64_to_hash(3));
 
-    struct user_request req = req_filecreate(sp->tm,
+    struct tm_request req = req_filecreate(sp->tm,
                                              i + 1,
                                              sp->iomt->mt_leaves + i,
                                              file_comp, file_orders, sp->iomt->mt_logleaves);
 
-    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
+    hash_t req_hmac = sign_request(userdata, &req);
     hash_t fr_hmac;
 
     struct tm_cert fr_cert = sp_request(sp,
@@ -424,11 +430,13 @@ struct user_request sp_createfile(struct service_provider *sp,
 }
 
 /* Expects ACL root to already be calculated */
-struct user_request sp_modifyacl(struct service_provider *sp,
-                                 uint64_t user_id, const void *key, size_t keylen,
-                                 uint64_t file_idx,
-                                 struct iomt *new_acl,
-                                 hash_t *ack_hmac)
+struct tm_request sp_modifyacl(struct service_provider *sp,
+                               uint64_t user_id,
+                               hash_t (*sign_request)(void *userdata, const struct tm_request *req),
+                               void *userdata,
+                               uint64_t file_idx,
+                               struct iomt *new_acl,
+                               hash_t *ack_hmac)
 {
     /* modification */
     struct file_record *rec = lookup_record(sp, file_idx);
@@ -447,7 +455,7 @@ struct user_request sp_modifyacl(struct service_provider *sp,
                                          acl_node - rec->acl->mt_leaves,
                                          &acl_orders);
 
-    struct user_request req = req_aclmodify(sp->tm,
+    struct tm_request req = req_aclmodify(sp->tm,
                                             &rec->fr_cert, rec->fr_hmac,
                                             file_node,
                                             file_comp, file_orders, sp->iomt->mt_logleaves,
@@ -460,7 +468,7 @@ struct user_request sp_modifyacl(struct service_provider *sp,
     free(acl_comp);
     free(acl_orders);
 
-    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
+    hash_t req_hmac = sign_request(userdata, &req);
 
     struct tm_cert new_fr = sp_request(sp,
                                        &req, req_hmac,
@@ -477,13 +485,15 @@ struct user_request sp_modifyacl(struct service_provider *sp,
     return req_null;
 }
 
-struct user_request sp_modifyfile(struct service_provider *sp,
-                                  uint64_t user_id, const void *key, size_t keylen,
-                                  uint64_t file_idx,
-                                  hash_t encrypted_secret, hash_t kf,
-                                  const struct iomt *buildcode, const struct iomt *composefile,
-                                  const void *encrypted_file, size_t filelen,
-                                  hash_t *ack_hmac)
+struct tm_request sp_modifyfile(struct service_provider *sp,
+                                uint64_t user_id,
+                                hash_t (*sign_request)(void *userdata, const struct tm_request *req),
+                                void *userdata,
+                                uint64_t file_idx,
+                                hash_t encrypted_secret, hash_t kf,
+                                const struct iomt *buildcode, const struct iomt *composefile,
+                                const void *encrypted_file, size_t filelen,
+                                hash_t *ack_hmac)
 {
     /* modification */
     struct file_record *rec = lookup_record(sp, file_idx);
@@ -505,7 +515,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     hash_t gamma = sha256(encrypted_file, filelen);
     hash_t lambda = calc_lambda(gamma, buildcode, composefile, kf);
 
-    struct user_request req = req_filemodify(sp->tm,
+    struct tm_request req = req_filemodify(sp->tm,
                                              &rec->fr_cert, rec->fr_hmac,
                                              file_node,
                                              file_comp, file_orders, sp->iomt->mt_logleaves,
@@ -517,7 +527,7 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     free(file_orders);
     free(acl_orders);
 
-    hash_t req_hmac = hmac_sha256(&req, sizeof(req), key, keylen);
+    hash_t req_hmac = sign_request(userdata, &req);
 
     struct tm_cert vr;
     hash_t vr_hmac, fr_hmac;
@@ -537,14 +547,6 @@ struct user_request sp_modifyfile(struct service_provider *sp,
     if(new_fr.type == FR)
         return req;
     return req_null;
-}
-
-static bool ack_verify(const struct user_request *req,
-                       const void *secret, size_t secret_len,
-                       hash_t hmac)
-{
-    hash_t correct = ack_sign(req, 1, secret, secret_len);
-    return hash_equals(hmac, correct);
 }
 
 /* Retrieve authenticated information (using the user's secret as the
@@ -701,7 +703,112 @@ void *sp_retrieve_file(struct service_provider *sp,
     return ret;
 }
 
+static hash_t get_client_signature(void *userdata, const struct tm_request *req)
+{
+    int *fd = userdata;
+    write(*fd, req, sizeof(*req));
+
+    hash_t hmac;
+    read(*fd, &hmac, sizeof(hmac));
+    return hmac;
+}
+
+int read_fd(void *userdata, void *buf, size_t len)
+{
+    int *fdptr = userdata;
+    return read(*fdptr, buf, len);
+}
+
+static void sp_handle_client(struct service_provider *sp, int cl)
+{
+    /* We should probably fork() here to avoid blocking */
+    struct user_request user_req;
+    if(read(cl, &user_req, sizeof(user_req)) != sizeof(user_req))
+        return;
+
+    hash_t ack_hmac = hash_null;
+
+    switch(user_req.type)
+    {
+    case CREATE_FILE:
+        sp_createfile(sp, user_req.create.user_id, get_client_signature, &cl, &ack_hmac);
+        break;
+    case MODIFY_ACL:
+    {
+        struct iomt *acl = iomt_deserialize(read_fd, &cl);
+        sp_modifyacl(sp,
+                     user_req.modify_acl.user_id,
+                     get_client_signature,
+                     &cl,
+                     user_req.modify_acl.file_idx,
+                     acl,
+                     &ack_hmac);
+        iomt_free(acl);
+        break;
+    }
+    case MODIFY_FILE:
+    {
+        struct iomt *buildcode = iomt_deserialize(read_fd, &cl);
+        struct iomt *composefile = iomt_deserialize(read_fd, &cl);
+        size_t filelen;
+        read(cl, &filelen, sizeof(filelen));
+        void *filebuf = malloc(filelen);
+        read(cl, filebuf, filelen);
+
+        sp_modifyfile(sp,
+                      user_req.modify_file.user_id,
+                      get_client_signature,
+                      &cl,
+                      user_req.modify_file.file_idx,
+                      user_req.modify_file.encrypted_secret,
+                      user_req.modify_file.kf,
+                      buildcode,
+                      composefile,
+                      filebuf, filelen,
+                      &ack_hmac);
+        iomt_free(buildcode);
+        iomt_free(composefile);
+    }
+    }
+
+    write(cl, &ack_hmac, sizeof(ack_hmac));
+}
+
+int sp_main(int sockfd)
+{
+#define BACKLOG 10
+
+    if(listen(sockfd, BACKLOG) < 0)
+    {
+        perror("listen");
+        return 1;
+    }
+
+    int logleaves = 8;
+    struct service_provider *sp = sp_new("a", 1, logleaves);
+
+    while(1)
+    {
+        int cl;
+
+        if((cl = accept(sockfd, NULL, NULL)) < 0)
+        {
+            perror("accept");
+            return 1;
+        }
+
+        sp_handle_client(sp, cl);
+        close(cl);
+    }
+}
+
 #include <time.h>
+
+static hash_t test_sign_request(void *userdata, const struct tm_request *req)
+{
+    const char *str = userdata;
+    return hmac_sha256(req, sizeof(*req), str, strlen(str));
+}
 
 void sp_test(void)
 {
@@ -717,7 +824,7 @@ void sp_test(void)
 
     {
         hash_t ack_hmac;
-        struct user_request req = sp_createfile(sp, 1, "a", 1, &ack_hmac);
+        struct tm_request req = sp_createfile(sp, 1, test_sign_request, "a", &ack_hmac);
 
         check("File creation", ack_verify(&req, "a", 1, ack_hmac));
 
@@ -734,7 +841,7 @@ void sp_test(void)
 #define N_MODIFY 100
         start = clock();
         for(int i = 0; i < N_MODIFY; ++i)
-            req = sp_modifyfile(sp, 1, "a", 1, 1, hash_null, hash_null, buildcode, NULL, "contents", 8, &ack_hmac);
+            req = sp_modifyfile(sp, 1, test_sign_request, "a", 1, hash_null, hash_null, buildcode, NULL, "contents", 8, &ack_hmac);
 
         stop = clock();
         printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
@@ -792,11 +899,12 @@ void sp_test(void)
 #define N_ACLMODIFY 100
         for(int i = 0; i < 100; ++i)
         {
-            struct user_request req = sp_modifyacl(sp,
-                                                   1, "a", 1,
-                                                   1,
-                                                   newacl,
-                                                   &ack);
+            struct tm_request req = sp_modifyacl(sp,
+                                                 1,
+                                                 test_sign_request, "a",
+                                                 1,
+                                                 newacl,
+                                                 &ack);
 
             success &= ack_verify(&req, "a", 1, ack);
         }

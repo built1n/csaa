@@ -1,4 +1,5 @@
 #include "crypto.h"
+#include "trusted_module.h"
 #include "test.h"
 
 #include <string.h>
@@ -374,6 +375,51 @@ struct iomt *iomt_dup(const struct iomt *tree)
     return newtree;
 }
 
+/* TODO: error checking */
+uint64_t read_u64(int (*read_fn)(void *userdata, void *buf, size_t len), void *userdata)
+{
+    uint64_t n;
+    read_fn(userdata, &n, sizeof(n));
+    return n;
+}
+
+void write_u64(void (*write_fn)(void *userdata, const void *data, size_t len),
+               void *userdata, uint64_t n)
+{
+    write_fn(userdata, &n, sizeof(n));
+}
+
+
+void iomt_serialize(const struct iomt *tree,
+                    void (*write_fn)(void *userdata, const void *data, size_t len),
+                    void *userdata)
+{
+    /* leafcount isn't needed */
+    if(tree)
+    {
+        write_u64(write_fn, userdata, tree->mt_logleaves);
+
+        write_fn(userdata, tree->mt_nodes, sizeof(hash_t) * (2 * tree->mt_leafcount - 1));
+        write_fn(userdata, tree->mt_leaves, sizeof(struct iomt_node) * tree->mt_leafcount);
+    }
+    else
+        write_u64(write_fn, userdata, 0);
+}
+
+struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t len),
+                              void *userdata)
+{
+    uint64_t logleaves = read_u64(read_fn, userdata);
+    if(!logleaves)
+        return NULL;
+    struct iomt *tree = iomt_new(logleaves);
+
+    read_fn(userdata, tree->mt_nodes, sizeof(hash_t) * (2 * tree->mt_leafcount - 1));
+    read_fn(userdata, tree->mt_leaves, sizeof(struct iomt_node) * tree->mt_leafcount);
+
+    return tree;
+}
+
 void iomt_free(struct iomt *tree)
 {
     if(tree)
@@ -522,8 +568,40 @@ hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt
     return h;
 }
 
+/* Generate a signed acknowledgement for successful completion of a
+ * request. We append a zero byte to the user request and take the
+ * HMAC. */
+hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_t keylen)
+{
+    HMAC_CTX *ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx,
+                 key, keylen,
+                 EVP_sha256(), NULL);
+
+    HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
+
+    unsigned char zero = 0;
+    for(int i = 0; i < nzeros; ++i)
+        HMAC_Update(ctx, &zero, 1);
+
+    hash_t hmac;
+    HMAC_Final(ctx, hmac.hash, NULL);
+    HMAC_CTX_free(ctx);
+
+    return hmac;
+}
+
+bool ack_verify(const struct tm_request *req,
+                const void *secret, size_t secret_len,
+                hash_t hmac)
+{
+    hash_t correct = ack_sign(req, 1, secret, secret_len);
+    return hash_equals(hmac, correct);
+}
+
 void crypto_test(void)
 {
+#if 1
     int *orders;
     int *comp = bintree_complement(6, 4, &orders);
     int correct[] = { 22, 9, 3, 2 };
@@ -570,4 +648,5 @@ void crypto_test(void)
         //dump_hash(root2);
         check("Merkle compute", hash_equals(root1, root2));
     }
+#endif
 }
