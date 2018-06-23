@@ -524,7 +524,7 @@ hash_t u64_to_hash(uint64_t n)
 
 /* simple XOR cipher, so encryption and decryption are symmetric */
 hash_t crypt_secret(hash_t encrypted_secret,
-                    uint64_t file_idx, uint64_t file_counter,
+                    uint64_t file_idx, uint64_t file_version,
                     const void *key, size_t keylen)
 {
     hash_t pad; /* key = encrypted_secret ^ pad */
@@ -535,7 +535,7 @@ hash_t crypt_secret(hash_t encrypted_secret,
 
     /* potential endianness issue */
     HMAC_Update(ctx, (const unsigned char*)&file_idx, sizeof(file_idx));
-    HMAC_Update(ctx, (const unsigned char*)&file_counter, sizeof(file_counter));
+    HMAC_Update(ctx, (const unsigned char*)&file_version, sizeof(file_version));
 
     HMAC_Final(ctx, pad.hash, NULL);
     HMAC_CTX_free(ctx);
@@ -597,6 +597,19 @@ bool ack_verify(const struct tm_request *req,
 {
     hash_t correct = ack_sign(req, 1, secret, secret_len);
     return hash_equals(hmac, correct);
+}
+
+void write_to_fd(void *userdata, const void *data, size_t len)
+{
+    int *fdptr = userdata;
+    write(*fdptr, data, len);
+}
+
+
+int read_from_fd(void *userdata, void *buf, size_t len)
+{
+    int *fdptr = userdata;
+    return read(*fdptr, buf, len);
 }
 
 void crypto_test(void)

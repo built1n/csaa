@@ -312,7 +312,7 @@ struct tm_cert sp_request(struct service_provider *sp,
             {
                 /* File is encrypted */
                 ver.encrypted_secret = tm_verify_and_encrypt_secret(sp->tm,
-                                                                    rec->idx, rec->counter,
+                                                                    rec->idx, rec->version,
                                                                     req->user_id,
                                                                     encrypted_secret, kf);
                 assert(!is_zero(ver.encrypted_secret));
@@ -614,13 +614,13 @@ struct version_info sp_fileinfo(struct service_provider *sp,
             free(orders);
         }
 
-        return tm_verify_file(sp->tm,
-                              user_id,
-                              &rv1, rv1_hmac,
-                              NULL, hash_null,
-                              NULL, hash_null,
-                              NULL, hash_null,
-                              hmac);
+        return tm_verify_fileinfo(sp->tm,
+                                  user_id,
+                                  &rv1, rv1_hmac,
+                                  NULL, hash_null,
+                                  NULL, hash_null,
+                                  NULL, hash_null,
+                                  hmac);
     }
 
     /* RV1 indicates counter */
@@ -639,7 +639,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
 
     struct file_version *ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
 
-    return tm_verify_file(sp->tm,
+    return tm_verify_fileinfo(sp->tm,
                           user_id,
                           &rv1, rv1_hmac,
                           &rv2, rv2_hmac,
@@ -659,6 +659,8 @@ void *sp_retrieve_file(struct service_provider *sp,
                        uint64_t file_idx,
                        uint64_t version,
                        hash_t *encrypted_secret,
+                       struct iomt **buildcode,
+                       struct iomt **composefile,
                        size_t *len)
 {
     struct file_record *rec = lookup_record(sp, file_idx);
@@ -700,6 +702,12 @@ void *sp_retrieve_file(struct service_provider *sp,
     void *ret = malloc(ver->contents_len);
     memcpy(ret, ver->contents, ver->contents_len);
 
+    /* duplicate compose and build files */
+    if(buildcode)
+        *buildcode = iomt_dup(ver->buildcode);
+    if(composefile)
+        *composefile = iomt_dup(ver->composefile);
+
     return ret;
 }
 
@@ -711,12 +719,6 @@ static hash_t get_client_signature(void *userdata, const struct tm_request *req)
     hash_t hmac;
     read(*fd, &hmac, sizeof(hmac));
     return hmac;
-}
-
-int read_fd(void *userdata, void *buf, size_t len)
-{
-    int *fdptr = userdata;
-    return read(*fdptr, buf, len);
 }
 
 static void sp_handle_client(struct service_provider *sp, int cl)
@@ -732,10 +734,11 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     {
     case CREATE_FILE:
         sp_createfile(sp, user_req.create.user_id, get_client_signature, &cl, &ack_hmac);
+        write(cl, &ack_hmac, sizeof(ack_hmac));
         break;
     case MODIFY_ACL:
     {
-        struct iomt *acl = iomt_deserialize(read_fd, &cl);
+        struct iomt *acl = iomt_deserialize(read_from_fd, &cl);
         sp_modifyacl(sp,
                      user_req.modify_acl.user_id,
                      get_client_signature,
@@ -744,14 +747,16 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                      acl,
                      &ack_hmac);
         iomt_free(acl);
+        write(cl, &ack_hmac, sizeof(ack_hmac));
         break;
     }
     case MODIFY_FILE:
     {
-        struct iomt *buildcode = iomt_deserialize(read_fd, &cl);
-        struct iomt *composefile = iomt_deserialize(read_fd, &cl);
+        struct iomt *buildcode = iomt_deserialize(read_from_fd, &cl);
+        struct iomt *composefile = iomt_deserialize(read_from_fd, &cl);
         size_t filelen;
         read(cl, &filelen, sizeof(filelen));
+
         void *filebuf = malloc(filelen);
         read(cl, filebuf, filelen);
 
@@ -768,10 +773,45 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                       &ack_hmac);
         iomt_free(buildcode);
         iomt_free(composefile);
+        write(cl, &ack_hmac, sizeof(ack_hmac));
+        break;
     }
+    case RETRIEVE_INFO:
+    {
+        struct version_info verinfo = sp_fileinfo(sp,
+                                                  user_req.retrieve.user_id,
+                                                  user_req.retrieve.file_idx,
+                                                  user_req.retrieve.version,
+                                                  &ack_hmac);
+        write(cl, &verinfo, sizeof(verinfo));
+        write(cl, &ack_hmac, sizeof(ack_hmac));
+        break;
     }
+    case RETRIEVE_FILE:
+    {
+        hash_t encrypted_secret;
+        size_t len;
+        struct iomt *buildcode = NULL, *composefile = NULL;
+        void *contents = sp_retrieve_file(sp,
+                                          user_req.retrieve.user_id,
+                                          user_req.retrieve.file_idx,
+                                          user_req.retrieve.version,
+                                          &encrypted_secret,
+                                          &buildcode,
+                                          &composefile,
+                                          &len);
+        /* write everything (no HMAC; the client should do a
+         * RETRIEVE_INFO request separately) */
+        write(cl, &encrypted_secret, sizeof(encrypted_secret));
+        iomt_serialize(buildcode, write_to_fd, &cl);
+        iomt_serialize(composefile, write_to_fd, &cl);
 
-    write(cl, &ack_hmac, sizeof(ack_hmac));
+        write(cl, &len, sizeof(len));
+        write(cl, contents, len);
+
+        break;
+    }
+    }
 }
 
 int sp_main(int sockfd)
@@ -882,6 +922,8 @@ void sp_test(void)
                                           1,
                                           1,
                                           &key,
+                                          NULL,
+                                          NULL,
                                           &len);
         check("File retrieval 1", !memcmp(contents, "contents", 8) && len == 8);
         free(contents);

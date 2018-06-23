@@ -682,12 +682,12 @@ struct tm_cert tm_request(struct trusted_module *tm,
 /* Untested. */
 hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t file_idx,
-                                    uint64_t file_counter,
+                                    uint64_t file_version,
                                     uint64_t user_id,
                                     hash_t encrypted_secret, hash_t kf)
 {
     hash_t key = crypt_secret(encrypted_secret,
-                              file_idx, file_counter,
+                              file_idx, file_version,
                               tm->user_keys[user_id - 1].key,
                               tm->user_keys[user_id - 1].len);
 
@@ -790,9 +790,9 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
     return hash_xor(secret, pad);
 }
 
-static hash_t sign_response(const struct trusted_module *tm,
-                            const struct version_info *ver,
-                            uint64_t user_id)
+static hash_t sign_verinfo(const struct trusted_module *tm,
+                           const struct version_info *ver,
+                           uint64_t user_id)
 {
     return hmac_sha256(ver, sizeof(*ver),
                        tm->user_keys[user_id - 1].key,
@@ -810,13 +810,13 @@ static hash_t sign_response(const struct trusted_module *tm,
  * one). Finally, FR should be the latest file record certificate
  * issued by the module, reflecting the latest counter value and
  * ACL. */
-struct version_info tm_verify_file(const struct trusted_module *tm,
-                                   uint64_t user_id,
-                                   const struct tm_cert *rv1, hash_t rv1_hmac,
-                                   const struct tm_cert *rv2, hash_t rv2_hmac,
-                                   const struct tm_cert *fr, hash_t fr_hmac,
-                                   const struct tm_cert *vr, hash_t vr_hmac,
-                                   hash_t *response_hmac)
+struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
+                                       uint64_t user_id,
+                                       const struct tm_cert *rv1, hash_t rv1_hmac,
+                                       const struct tm_cert *rv2, hash_t rv2_hmac,
+                                       const struct tm_cert *fr, hash_t fr_hmac,
+                                       const struct tm_cert *vr, hash_t vr_hmac,
+                                       hash_t *response_hmac)
 {
     struct version_info verinfo = verinfo_null;
 
@@ -853,7 +853,7 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     if(is_zero(rv1->rv.val))
     {
         verinfo.idx = rv1->rv.idx;
-        *response_hmac = sign_response(tm, &verinfo, user_id);
+        *response_hmac = sign_verinfo(tm, &verinfo, user_id);
         return verinfo;
     }
 
@@ -911,7 +911,7 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
 
     /* Prepare the denial response now so we can fail if needed. */
     verinfo.idx = fr->fr.idx;
-    *response_hmac = sign_response(tm, &verinfo, rv2->rv.idx);
+    *response_hmac = sign_verinfo(tm, &verinfo, user_id);
 
     if(hash_to_u64(rv2->rv.val) < 1)
     {
@@ -926,7 +926,7 @@ struct version_info tm_verify_file(const struct trusted_module *tm,
     verinfo.version = vr->vr.version;
     verinfo.lambda = vr->vr.hash;
 
-    *response_hmac = sign_response(tm, &verinfo, user_id);
+    *response_hmac = sign_verinfo(tm, &verinfo, user_id);
     return verinfo;
 }
 

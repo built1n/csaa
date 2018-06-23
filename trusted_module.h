@@ -172,7 +172,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
                           hash_t *ack_hmac);
 
 /* enc_secret is encrypted by the user by XOR'ing the file encryption
- * key with h(f + c_f + K), where + denotes concatenation. The purpose
+ * key with h(f + q + K), where + denotes concatenation. The purpose
  * of this function is to decrypt the secret passed by the user,
  * verify its integrity against kf=HMAC(secret, key=f_idx), and then
  * re-encrypt the secret with the module's secret key. This is the
@@ -180,7 +180,7 @@ struct tm_cert tm_request(struct trusted_module *tm,
 /* Untested. */
 hash_t tm_verify_and_encrypt_secret(const struct trusted_module *tm,
                                     uint64_t file_idx,
-                                    uint64_t file_counter,
+                                    uint64_t file_version,
                                     uint64_t user_id,
                                     hash_t encrypted_secret, hash_t kf);
 
@@ -197,13 +197,13 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
                           const struct tm_cert *fr, hash_t fr_hmac,
                           hash_t encrypted_secret, hash_t kf);
 
-struct version_info tm_verify_file(const struct trusted_module *tm,
-                                   uint64_t user_id,
-                                   const struct tm_cert *rv1, hash_t rv1_hmac,
-                                   const struct tm_cert *rv2, hash_t rv2_hmac,
-                                   const struct tm_cert *fr, hash_t fr_hmac,
-                                   const struct tm_cert *vr, hash_t vr_hmac,
-                                   hash_t *response_hmac);
+struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
+                                       uint64_t user_id,
+                                       const struct tm_cert *rv1, hash_t rv1_hmac,
+                                       const struct tm_cert *rv2, hash_t rv2_hmac,
+                                       const struct tm_cert *fr, hash_t fr_hmac,
+                                       const struct tm_cert *vr, hash_t vr_hmac,
+                                       hash_t *response_hmac);
 
 const char *tm_geterror(void);
 

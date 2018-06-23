@@ -136,7 +136,7 @@ struct hashstring {
 struct hashstring hash_format(hash_t h, int n);
 
 hash_t crypt_secret(hash_t encrypted_secret,
-                    uint64_t file_idx, uint64_t file_counter,
+                    uint64_t file_idx, uint64_t file_version,
                     const void *key, size_t keylen);
 
 hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf);
@@ -148,6 +148,9 @@ hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_
 bool ack_verify(const struct tm_request *req,
                 const void *secret, size_t secret_len,
                 hash_t hmac);
+
+void write_to_fd(void *userdata, const void *data, size_t len);
+int read_from_fd(void *userdata, void *buf, size_t len);
 
 /* self-test */
 void crypto_test(void);

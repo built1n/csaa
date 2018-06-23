@@ -17,11 +17,6 @@
 
 char *socket_path = "socket";
 
-static bool need_sign(int reqtype)
-{
-    return reqtype == CREATE_FILE || reqtype == MODIFY_FILE || reqtype == MODIFY_ACL;
-}
-
 static struct tm_request verify_and_sign(int fd, const struct user_request *req)
 {
     struct tm_request tmr = req_null;
@@ -57,6 +52,8 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req)
         /* TODO */
         break;
     }
+    default:
+        break;
     }
 
     hash_t hmac = hmac_sha256(&tmr, sizeof(tmr), "a", 1);
@@ -77,17 +74,23 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
     return ack_verify(tmr, "a", 1, hmac);
 }
 
-void write_fd(void *userdata, const void *data, size_t len)
-{
-    int *fdptr = userdata;
-    write(*fdptr, data, len);
-}
-
+/* In case of modifcation or file creation, returns true on successful
+ * completion of request, as acknowledged by module. In case of info
+ * retrieval, returns true if version info is verified by module. The
+ * verinfo_out, user_key, and keylen parameters must not be NULL in
+ * this case (in all other cases they are ignored). */
 bool exec_request(int fd, const struct user_request *req,
-                  const struct iomt *new_acl,
-                  const struct iomt *new_buildcode,
-                  const struct iomt *new_composefile,
-                  const void *file_contents, size_t len)
+                  const struct iomt *new_acl,                /* MODIFY_ACL only */
+                  const struct iomt *new_buildcode,          /* MODIFY_FILE only */
+                  const struct iomt *new_composefile,        /* MODIFY_FILE only */
+                  const void *new_file_contents, size_t len, /* MODIFY_FILE only */
+                  struct version_info *verinfo_out,          /* RETRIEVE_INFO only */
+                  const void *user_key, size_t keylen,       /* RETRIEVE_INFO and RETRIEVE_FILE only */
+                  struct iomt **buildcode,                   /* RETRIEVE_FILE only */
+                  struct iomt **composefile,                 /* RETRIEVE_FILE only */
+                  hash_t *secret_out,                        /* RETRIEVE_FILE only */
+                  void **file_contents_out,                  /* RETRIEVE_FILE only */
+                  size_t *file_len)                          /* RETRIEVE_FILE only */
 {
     write(fd, req, sizeof(*req));
     /* write additional data */
@@ -95,16 +98,16 @@ bool exec_request(int fd, const struct user_request *req,
     {
     case MODIFY_ACL:
         /* send ACL */
-        iomt_serialize(new_acl, write_fd, &fd);
+        iomt_serialize(new_acl, write_to_fd, &fd);
         break;
     case MODIFY_FILE:
         /* send build code, compose file, and file contents */
-        iomt_serialize(new_buildcode, write_fd, &fd);
-        iomt_serialize(new_composefile, write_fd, &fd);
+        iomt_serialize(new_buildcode, write_to_fd, &fd);
+        iomt_serialize(new_composefile, write_to_fd, &fd);
 
         /* prefix file with size */
         write(fd, &len, sizeof(len));
-        write(fd, file_contents, len);
+        write(fd, new_file_contents, len);
         break;
     case CREATE_FILE:
     case RETRIEVE_INFO:
@@ -114,18 +117,52 @@ bool exec_request(int fd, const struct user_request *req,
         break;
     }
 
-    struct tm_request tmr;
-
-    /* sign request */
-    if(need_sign(req->type))
+    switch(req->type)
     {
-        /* read a tm_request from the file descriptor, and verify that
-         * it carries out the requested action, and then sign */
-        tmr = verify_and_sign(fd, req);
+    case CREATE_FILE:
+    case MODIFY_ACL:
+    case MODIFY_FILE:
+    {
+        /* verify module ack */
+        struct tm_request tmr = verify_and_sign(fd, req);
+        return verify_sp_ack(fd, &tmr);
     }
+    case RETRIEVE_INFO:
+    {
+        hash_t hmac;
+        struct version_info verinfo;
+        read(fd, &verinfo, sizeof(verinfo));
+        read(fd, &hmac, sizeof(hmac));
 
-    /* verify acknowledgement */
-    return verify_sp_ack(fd, &tmr);
+        if(hash_equals(hmac, hmac_sha256(&verinfo, sizeof(verinfo), user_key, keylen)))
+        {
+            *verinfo_out = verinfo;
+            return true;
+        }
+        return false;
+    }
+    case RETRIEVE_FILE:
+    {
+        hash_t encrypted_secret;
+        read(fd, &encrypted_secret, sizeof(encrypted_secret));
+
+        *secret_out = crypt_secret(encrypted_secret,
+                                   req->retrieve.file_idx,
+                                   req->retrieve.version,
+                                   user_key, keylen);
+
+        *buildcode = iomt_deserialize(read_from_fd, &fd);
+        *composefile = iomt_deserialize(read_from_fd, &fd);
+
+        read(fd, file_len, sizeof(*file_len));
+
+        *file_contents_out = malloc(*file_len);
+        read(fd, file_contents_out, *file_len);
+        return true;
+    }
+    default:
+        assert(false);
+    }
 }
 
 int connect_to_service(const char *sockpath)
@@ -167,7 +204,9 @@ int main(int argc, char *argv[]) {
     req.type = CREATE_FILE;
     req.create.user_id = 1;
 
-    check("Client file creation", exec_request(fd, &req, NULL, NULL, NULL, NULL, 0));
+    check("Client file creation", exec_request(fd, &req, NULL, NULL, NULL, NULL, 0,
+                                               NULL, NULL, 0,
+                                               NULL, NULL, NULL, NULL, NULL));
     close(fd);
     fd = connect_to_service(socket_path);
 
@@ -177,7 +216,9 @@ int main(int argc, char *argv[]) {
     req.modify_file.encrypted_secret = hash_null;
     req.modify_file.kf = hash_null;
 
-    check("Client file modification", exec_request(fd, &req, NULL, NULL, NULL, "contents", 8));
+    check("Client file modification", exec_request(fd, &req, NULL, NULL, NULL, "contents", 8,
+                                                   NULL, NULL, 0,
+                                                   NULL, NULL, NULL, NULL, NULL));
     close(fd);
 
     return 0;

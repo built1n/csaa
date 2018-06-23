@@ -105,7 +105,7 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 /* Retrieve authenticated information on a version of a file; if
  * version is zero, default to the latest version. */
 struct version_info sp_fileinfo(struct service_provider *sp,
-                                uint64_t user_id, uint64_t file_id,
+                                uint64_t user_id, uint64_t file_idx,
                                 uint64_t version,
                                 hash_t *hmac);
 
@@ -115,6 +115,8 @@ void *sp_retrieve_file(struct service_provider *sp,
                        uint64_t file_idx,
                        uint64_t version,
                        hash_t *encrypted_secret,
+                       struct iomt **buildcode,
+                       struct iomt **composefile,
                        size_t *len);
 
 int sp_main(int sockfd);
