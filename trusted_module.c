@@ -863,32 +863,34 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
         return verinfo;
     }
 
-    /* We must have the other 3 certificates to continue. */
-    if(!rv2 || !fr || !vr)
+    /* We must have these 2 certificates to continue (VR can be null
+     * for the next part). */
+    if(!rv2 || !fr)
     {
         tm_seterror("null parameter");
         return verinfo_null;
     }
 
+    /* It's possible to have a null VR certificate and a perfectly
+     * valid RV2 and FR certificate when the file has just been
+     * created, but not modifed yet, so we do not check VR just
+     * yet. */
     if(!cert_verify(tm, rv2, rv2_hmac) ||
-       !cert_verify(tm, fr, fr_hmac)   ||
-       !cert_verify(tm, vr, vr_hmac))
+       !cert_verify(tm, fr, fr_hmac))
     {
         tm_seterror("certificate signature invalid");
         return verinfo_null;
     }
 
     if(rv2->type != RV ||
-       fr->type != FR  ||
-       vr->type != VR)
+       fr->type  != FR)
     {
         tm_seterror("wrong certificate type");
         return verinfo_null;
     }
 
     /* Ensure that all file indices match */
-    if(rv1->rv.idx != fr->fr.idx ||
-       rv1->rv.idx != vr->vr.idx)
+    if(rv1->rv.idx != fr->fr.idx)
     {
         tm_seterror("certificate indices do not match");
         return verinfo_null;
@@ -915,21 +917,62 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
         return verinfo_null;
     }
 
-    /* Prepare the denial response now so we can fail if needed. */
-    verinfo.idx = fr->fr.idx;
-    *response_hmac = sign_verinfo(tm, &verinfo, user_id);
-
     if(hash_to_u64(rv2->rv.val) < 1)
     {
-        /* insufficient access level */
+        /* insufficient access level; produce an authenticated denial
+         * (which is indistinguishable from the response when a file
+         * does not exist) */
+        verinfo.idx = fr->fr.idx;
+        *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+
         return verinfo;
     }
 
-    /* We have verified that the file exists and can convey this to
-     * the user */
+    if(!vr)
+    {
+        if(!fr->fr.version)
+        {
+            /* File has been created, but has no contents (and hence
+             * no versions). We issue a response to this effect. */
+            verinfo.idx = fr->fr.idx;
+            verinfo.counter = fr->fr.counter;
+            verinfo.max_version = fr->fr.version;
+            verinfo.version = 0;
+            verinfo.current_acl = fr->fr.acl;
+            verinfo.lambda = hash_null;
+
+            *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+            return verinfo;
+        }
+        tm_seterror("null VR even though maxversion > 0");
+        return verinfo_null;
+    }
+
+    if(!cert_verify(tm, vr, vr_hmac))
+    {
+        tm_seterror("certificate signature invalid");
+        return verinfo_null;
+    }
+
+    if(vr->type != VR)
+    {
+        tm_seterror("wrong certificate type");
+        return verinfo_null;
+    }
+
+    if(rv1->rv.idx != vr->vr.idx)
+    {
+        tm_seterror("certificate indices do not match");
+        return verinfo_null;
+    }
+
+    /* We have verified that this file version exists and can
+     * authenticate its record. */
+    verinfo.idx = fr->fr.idx;
     verinfo.counter = fr->fr.counter;
     verinfo.max_version = fr->fr.version;
     verinfo.version = vr->vr.version;
+    verinfo.current_acl = fr->fr.acl;
     verinfo.lambda = vr->vr.hash;
 
     *response_hmac = sign_verinfo(tm, &verinfo, user_id);

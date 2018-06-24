@@ -555,6 +555,9 @@ hash_t crypt_secret(hash_t encrypted_secret,
  * forgo any HMAC. */
 hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf)
 {
+    printf("calc_lambda: gamma = %s, buildcode = %s, compose = %s, kf = %s\n",
+           hash_format(gamma, 4).str, hash_format(buildcode->mt_nodes[0], 4).str,
+           hash_format(composefile->mt_nodes[0], 4).str, hash_format(kf, 4).str);
     hash_t buildcode_root = hash_null, composefile_root = hash_null;
     if(buildcode)
         buildcode_root = buildcode->mt_nodes[0];
@@ -623,6 +626,14 @@ int read_from_fd(void *userdata, void *buf, size_t len)
         printf("short read");
     }
     return rc;
+}
+
+void dump_versioninfo(const struct version_info *verinfo)
+{
+    printf("idx = %lu, ctr = %lu, ver = %lu, max_ver = %lu, acl = %s, lambda = %s\n",
+           verinfo->idx, verinfo->counter, verinfo->version, verinfo->max_version,
+           hash_format(verinfo->current_acl, 4).str,
+           hash_format(verinfo->lambda, 4).str);
 }
 
 void crypto_test(void)

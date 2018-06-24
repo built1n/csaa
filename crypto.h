@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 struct tm_request;
+struct version_info;
 
 /* Various useful cryptographic functions; shared between TM and SP. */
 
@@ -151,6 +152,8 @@ bool ack_verify(const struct tm_request *req,
 
 void write_to_fd(void *userdata, const void *data, size_t len);
 int read_from_fd(void *userdata, void *buf, size_t len);
+
+void dump_versioninfo(const struct version_info *verinfo);
 
 /* self-test */
 void crypto_test(void);

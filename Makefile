@@ -1,5 +1,5 @@
 all: client server Makefile
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall -O0
 
 client: client.o crypto.o test.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)

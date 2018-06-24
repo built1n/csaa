@@ -641,15 +641,19 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                         user_id,
                                         &rv2_hmac);
 
-    struct file_version *ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
+    struct file_version *ver;
+    if(rec->nversions > 0)
+        ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
+    else
+        ver = NULL;
 
     return tm_verify_fileinfo(sp->tm,
-                          user_id,
-                          &rv1, rv1_hmac,
-                          &rv2, rv2_hmac,
-                          &rec->fr_cert, rec->fr_hmac,
-                          &ver->vr_cert, ver->vr_hmac,
-                          hmac);
+                              user_id,
+                              &rv1, rv1_hmac,
+                              &rv2, rv2_hmac,
+                              &rec->fr_cert, rec->fr_hmac,
+                              ver ? &ver->vr_cert : NULL, ver ? ver->vr_hmac : hash_null,
+                              hmac);
 }
 
 /* This file retrieves the file given by file_idx for a given
@@ -771,6 +775,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         size_t filelen;
         recv(cl, &filelen, sizeof(filelen), MSG_WAITALL);
 
+        printf("File is %lu bytes.\n", filelen);
         void *filebuf = malloc(filelen);
         recv(cl, filebuf, filelen, MSG_WAITALL);
 
@@ -850,7 +855,7 @@ int sp_main(int sockfd)
 
     signal(SIGPIPE, SIG_IGN);
 
-    int logleaves = 8;
+    int logleaves = 10;
     struct service_provider *sp = sp_new("a", 1, logleaves);
 
     while(1)

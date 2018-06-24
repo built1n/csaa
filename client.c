@@ -64,7 +64,7 @@ void print_usage(const char *name)
            "\n"
            "Where COMMAND and PARAMS are one of the following:\n"
            " create (takes no parameters)\n"
-           " modifyacl fileidx USER1 ACCESS1 ... USERn ACCESSn\n"
+           " modifyacl fileidx USER_1 ACCESS_1 ... USER_n ACCESS_n\n"
            " modifyfile fileidx buildcode_file compose_file image_file [FILE_KEY]\n"
            " retrieveinfo fileidx version\n"
            " retrievefile fileidx version buildcode_out compose_out image_out [FILE_KEY]\n", name);
@@ -220,6 +220,8 @@ bool parse_args(int argc, char *argv[])
 
             if(!strcmp(arg, "retrievefile"))
             {
+                cl_request.type = RETRIEVE_FILE;
+
                 buildcode_path = argv[++i];
                 compose_path = argv[++i];
                 image_path = argv[++i];
@@ -246,10 +248,7 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req)
 {
     struct tm_request tmr = req_null;
     if(recv(fd, &tmr, sizeof(tmr), MSG_WAITALL) != sizeof(tmr))
-    {
-        perror("short read");
-        exit(1);
-    }
+        return req_null;
 
     assert(tmr.type != REQ_NONE);
 
@@ -298,10 +297,7 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
 {
     hash_t hmac = hash_null;
     if(recv(fd, &hmac, sizeof(hmac), MSG_WAITALL) != sizeof(hmac))
-    {
-        perror("read 2");
-        exit(2);
-    }
+        return false;
 
     return ack_verify(tmr, userkey, strlen(userkey), hmac);
 }
@@ -392,7 +388,7 @@ bool exec_request(int fd, const struct user_request *req,
         recv(fd, file_len, sizeof(*file_len), MSG_WAITALL);
 
         *file_contents_out = malloc(*file_len);
-        recv(fd, file_contents_out, *file_len, MSG_WAITALL);
+        recv(fd, *file_contents_out, *file_len, MSG_WAITALL);
         return true;
     }
     default:
@@ -430,11 +426,19 @@ int connect_to_service(const char *sockpath)
 void *load_file(const char *path, size_t *len)
 {
     FILE *f = fopen(path, "r");
-    *len = fseek(f, 0, SEEK_END);
+    fseek(f, 0, SEEK_END);
+    *len = ftell(f);
     fseek(f, 0, SEEK_SET);
     void *buf = malloc(*len);
     fread(buf, 1, *len, f);
     return buf;
+}
+
+void write_file(const char *path, const void *contents, size_t len)
+{
+    FILE *f = fopen(path, "w");
+    fwrite(contents, 1, len, f);
+    fclose(f);
 }
 
 bool server_request(const char *sockpath,
@@ -498,6 +502,23 @@ bool server_request(const char *sockpath,
     case CREATE_FILE:
         printf("Created file with index %lu.\n", tmreq.idx);
         break;
+    case RETRIEVE_INFO:
+        printf("File info: ");
+        dump_versioninfo(&verinfo);
+        break;
+    case RETRIEVE_FILE:
+    {
+        hash_t gamma = sha256(file_contents, file_len);
+        hash_t lambda = calc_lambda(gamma, buildcode, composefile, req.modify_file.kf);
+
+        printf("File lambda = %s\n", hash_format(lambda, 4).str);
+
+        /* TODO: decrypt file */
+        printf("Writing image file to %s.\n", image_path);
+        write_file(image_path, file_contents, file_len);
+        /* What about build code? We only have the IOMT, not the actual contents. */
+        break;
+    }
     default:
         break;
     }

@@ -91,6 +91,7 @@ struct version_info {
     uint64_t idx;
     uint64_t counter;
     uint64_t version, max_version;
+    hash_t current_acl; /* not version ACL */
     hash_t lambda; /* equal to HMAC(h(encrypted_contents), key=HMAC(key, file_idx)) */
 };
 
