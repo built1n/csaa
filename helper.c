@@ -106,7 +106,7 @@ struct tm_request req_filecreate(const struct trusted_module *tm,
     req.counter = 0;
 
     /* construct ACL with a single element (the user, with full access) */
-    struct iomt_node acl_node = (struct iomt_node) { 1, 1, u64_to_hash(3) };
+    struct iomt_node acl_node = (struct iomt_node) { user_id, user_id, u64_to_hash(3) };
     req.val = merkle_compute(hash_node(&acl_node), NULL, NULL, 0);
 
     hash_t one = u64_to_hash(1);

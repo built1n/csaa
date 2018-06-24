@@ -2,6 +2,8 @@
 #include "trusted_module.h"
 #include "test.h"
 
+#include <sys/socket.h>
+#include <unistd.h>
 #include <string.h>
 
 #include <openssl/hmac.h>
@@ -379,7 +381,11 @@ struct iomt *iomt_dup(const struct iomt *tree)
 uint64_t read_u64(int (*read_fn)(void *userdata, void *buf, size_t len), void *userdata)
 {
     uint64_t n;
-    read_fn(userdata, &n, sizeof(n));
+    if(read_fn(userdata, &n, sizeof(n)) != sizeof(n))
+    {
+        printf("short read\n");
+        return 0;
+    }
     return n;
 }
 
@@ -388,7 +394,6 @@ void write_u64(void (*write_fn)(void *userdata, const void *data, size_t len),
 {
     write_fn(userdata, &n, sizeof(n));
 }
-
 
 void iomt_serialize(const struct iomt *tree,
                     void (*write_fn)(void *userdata, const void *data, size_t len),
@@ -435,6 +440,9 @@ void iomt_free(struct iomt *tree)
 
 struct iomt *iomt_from_lines(const char *filename)
 {
+    if(!filename)
+        return NULL;
+
     struct iomt *tree = iomt_new(FILELINES_LOGLEAVES);
 
     FILE *f = fopen(filename, "r");
@@ -445,7 +453,7 @@ struct iomt *iomt_from_lines(const char *filename)
     int c;
     uint64_t line = 0;
 
-    while(c != EOF)
+    do
     {
         c = fgetc(f);
 
@@ -473,7 +481,7 @@ struct iomt *iomt_from_lines(const char *filename)
             /* re-initialize for next line */
             SHA256_Init(&ctx);
         }
-    }
+    } while(c != EOF);
 
     fclose(f);
 
@@ -609,7 +617,12 @@ void write_to_fd(void *userdata, const void *data, size_t len)
 int read_from_fd(void *userdata, void *buf, size_t len)
 {
     int *fdptr = userdata;
-    return read(*fdptr, buf, len);
+    int rc = recv(*fdptr, buf, len, MSG_WAITALL);
+    if(rc != len)
+    {
+        printf("short read");
+    }
+    return rc;
 }
 
 void crypto_test(void)

@@ -653,6 +653,12 @@ struct tm_cert tm_request(struct trusted_module *tm,
     }
     else if(req->type == ACL_UPDATE)
     {
+        if(access < 3)
+        {
+            tm_seterror("user has insufficient permissions");
+            return cert_null;
+        }
+
         /* We just need a new FR certificate with the new ACL. */
         struct tm_cert cert = cert_null;
         cert.type = FR;

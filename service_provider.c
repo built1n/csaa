@@ -2,6 +2,7 @@
  * module */
 
 #include <assert.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -402,9 +403,9 @@ struct tm_request sp_createfile(struct service_provider *sp,
                            user_id, user_id, u64_to_hash(3));
 
     struct tm_request req = req_filecreate(sp->tm,
-                                             i + 1,
-                                             sp->iomt->mt_leaves + i,
-                                             file_comp, file_orders, sp->iomt->mt_logleaves);
+                                           user_id,
+                                           sp->iomt->mt_leaves + i,
+                                           file_comp, file_orders, sp->iomt->mt_logleaves);
 
     hash_t req_hmac = sign_request(userdata, &req);
     hash_t fr_hmac;
@@ -456,12 +457,12 @@ struct tm_request sp_modifyacl(struct service_provider *sp,
                                          &acl_orders);
 
     struct tm_request req = req_aclmodify(sp->tm,
-                                            &rec->fr_cert, rec->fr_hmac,
-                                            file_node,
-                                            file_comp, file_orders, sp->iomt->mt_logleaves,
-                                            acl_node,
-                                            acl_comp, acl_orders, rec->acl->mt_logleaves,
-                                            new_acl->mt_nodes[0]);
+                                          &rec->fr_cert, rec->fr_hmac,
+                                          file_node,
+                                          file_comp, file_orders, sp->iomt->mt_logleaves,
+                                          acl_node,
+                                          acl_comp, acl_orders, rec->acl->mt_logleaves,
+                                          new_acl->mt_nodes[0]);
 
     free(file_comp);
     free(file_orders);
@@ -498,7 +499,10 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     /* modification */
     struct file_record *rec = lookup_record(sp, file_idx);
     if(!rec)
+    {
+        printf("Could not find file with index %lu\n", file_idx);
         return req_null;
+    }
 
     int *file_orders, *acl_orders;
     struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx);
@@ -714,10 +718,13 @@ void *sp_retrieve_file(struct service_provider *sp,
 static hash_t get_client_signature(void *userdata, const struct tm_request *req)
 {
     int *fd = userdata;
-    write(*fd, req, sizeof(*req));
+    if(write(*fd, req, sizeof(*req)) != sizeof(*req))
+        return hash_null;
 
     hash_t hmac;
-    read(*fd, &hmac, sizeof(hmac));
+    if(recv(*fd, &hmac, sizeof(hmac), MSG_WAITALL) != sizeof(hmac))
+        return hash_null;
+
     return hmac;
 }
 
@@ -725,7 +732,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
 {
     /* We should probably fork() here to avoid blocking */
     struct user_request user_req;
-    if(read(cl, &user_req, sizeof(user_req)) != sizeof(user_req))
+    if(recv(cl, &user_req, sizeof(user_req), MSG_WAITALL) != sizeof(user_req))
         return;
 
     hash_t ack_hmac = hash_null;
@@ -733,44 +740,54 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     switch(user_req.type)
     {
     case CREATE_FILE:
-        sp_createfile(sp, user_req.create.user_id, get_client_signature, &cl, &ack_hmac);
-        write(cl, &ack_hmac, sizeof(ack_hmac));
+    {
+        printf("Client: create file\n");
+        sp_createfile(sp, user_req.user_id, get_client_signature, &cl, &ack_hmac);
+        if(write(cl, &ack_hmac, sizeof(ack_hmac)) != sizeof(ack_hmac))
+            return;
         break;
+    }
     case MODIFY_ACL:
     {
+        printf("Client: modify ACL\n");
         struct iomt *acl = iomt_deserialize(read_from_fd, &cl);
         sp_modifyacl(sp,
-                     user_req.modify_acl.user_id,
+                     user_req.user_id,
                      get_client_signature,
                      &cl,
                      user_req.modify_acl.file_idx,
                      acl,
                      &ack_hmac);
         iomt_free(acl);
-        write(cl, &ack_hmac, sizeof(ack_hmac));
+        if(write(cl, &ack_hmac, sizeof(ack_hmac)) != sizeof(ack_hmac))
+            return;
         break;
     }
     case MODIFY_FILE:
     {
+        printf("Client: modify file\n");
         struct iomt *buildcode = iomt_deserialize(read_from_fd, &cl);
         struct iomt *composefile = iomt_deserialize(read_from_fd, &cl);
         size_t filelen;
-        read(cl, &filelen, sizeof(filelen));
+        recv(cl, &filelen, sizeof(filelen), MSG_WAITALL);
 
         void *filebuf = malloc(filelen);
-        read(cl, filebuf, filelen);
+        recv(cl, filebuf, filelen, MSG_WAITALL);
 
-        sp_modifyfile(sp,
-                      user_req.modify_file.user_id,
-                      get_client_signature,
-                      &cl,
-                      user_req.modify_file.file_idx,
-                      user_req.modify_file.encrypted_secret,
-                      user_req.modify_file.kf,
-                      buildcode,
-                      composefile,
-                      filebuf, filelen,
-                      &ack_hmac);
+        if(sp_modifyfile(sp,
+                         user_req.user_id,
+                         get_client_signature,
+                         &cl,
+                         user_req.modify_file.file_idx,
+                         user_req.modify_file.encrypted_secret,
+                         user_req.modify_file.kf,
+                         buildcode,
+                         composefile,
+                         filebuf, filelen,
+                         &ack_hmac).type == REQ_NONE)
+        {
+            printf("Failed: %s\n", tm_geterror());
+        }
         iomt_free(buildcode);
         iomt_free(composefile);
         write(cl, &ack_hmac, sizeof(ack_hmac));
@@ -778,8 +795,9 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
     case RETRIEVE_INFO:
     {
+        printf("Client: retrieve info\n");
         struct version_info verinfo = sp_fileinfo(sp,
-                                                  user_req.retrieve.user_id,
+                                                  user_req.user_id,
                                                   user_req.retrieve.file_idx,
                                                   user_req.retrieve.version,
                                                   &ack_hmac);
@@ -789,11 +807,12 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
     case RETRIEVE_FILE:
     {
+        printf("Client: retrieve file\n");
         hash_t encrypted_secret;
         size_t len;
         struct iomt *buildcode = NULL, *composefile = NULL;
         void *contents = sp_retrieve_file(sp,
-                                          user_req.retrieve.user_id,
+                                          user_req.user_id,
                                           user_req.retrieve.file_idx,
                                           user_req.retrieve.version,
                                           &encrypted_secret,
@@ -811,6 +830,11 @@ static void sp_handle_client(struct service_provider *sp, int cl)
 
         break;
     }
+    case USERREQ_NONE:
+    {
+        printf("null request\n");
+        exit(1);
+    }
     }
 }
 
@@ -823,6 +847,8 @@ int sp_main(int sockfd)
         perror("listen");
         return 1;
     }
+
+    signal(SIGPIPE, SIG_IGN);
 
     int logleaves = 8;
     struct service_provider *sp = sp_new("a", 1, logleaves);

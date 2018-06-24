@@ -31,7 +31,7 @@ void cleanup(void)
         unlink(cleanup_socket);
 }
 
-void sigint(int sig)
+void signal_handler(int sig)
 {
     cleanup();
     exit(1);
@@ -46,7 +46,7 @@ void run_tests(void)
 
 int main()
 {
-    run_tests();
+    //run_tests();
 
     const char *socket_name = "socket";
     int sockfd;
@@ -59,7 +59,8 @@ int main()
     cleanup_socket = socket_name;
 
     atexit(cleanup);
-    signal(SIGINT, sigint);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     sp_main(sockfd);
 }

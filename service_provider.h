@@ -32,30 +32,33 @@ struct service_provider;
 
 /* request from the client to the service */
 struct user_request {
-    enum { CREATE_FILE, MODIFY_FILE, MODIFY_ACL, RETRIEVE_INFO, RETRIEVE_FILE } type;
+    enum { USERREQ_NONE = 0, CREATE_FILE, MODIFY_FILE, MODIFY_ACL, RETRIEVE_INFO, RETRIEVE_FILE } type;
+    uint64_t user_id;
     union {
         struct {
-            uint64_t user_id;
-        } create;
-        struct {
-            uint64_t user_id, file_idx;
+            uint64_t file_idx;
             /* ACL IOMT will follow */
+
+            /* service will respond with tm_request structure,
+             * requiring a client signature; then the module's HMAC
+             * will follow */
         } modify_acl;
         struct {
-            uint64_t user_id, file_idx;
+            uint64_t file_idx;
             hash_t encrypted_secret, kf;
             /* file contents, build code IOMT, and compose file IOMT
              * will follow */
 
-            /* will respond with module's HMAC of tm_request struct
-             * plus a zero byte */
+            /* service will respond with tm_request structure,
+             * requiring a client signature; then the module's HMAC
+             * will follow */
         } modify_file;
         struct {
             /* same structure for retrieve file and retrieve info */
-            uint64_t user_id, file_idx, version;
-            /* will respond with either version_info struct, plus
-             * HMAC, or file contents and key (which the client can
-             * verify themselves) */
+            uint64_t file_idx, version;
+            /* service will respond with either version_info struct,
+             * plus HMAC, or file contents and key (which the client
+             * can verify themselves) */
         } retrieve;
     };
 } __attribute__((packed));
