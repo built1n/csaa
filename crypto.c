@@ -277,30 +277,52 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
     }
 }
 
+hash_t iomt_getroot(const struct iomt *tree)
+{
+    return tree->mt_nodes[0];
+}
+
+struct iomt_node *iomt_get_leaf_by_idx(const struct iomt *tree, uint64_t leafidx)
+{
+    return tree->mt_leaves + leafidx;
+}
+
 /* find a node with given idx */
-struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx)
+struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t *leafidx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
         if(idx == tree->mt_leaves[i].idx)
+        {
+            if(leafidx)
+                *leafidx = i;
             return tree->mt_leaves + i;
+        }
     return NULL;
 }
 
-struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx)
+struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
         if(encloses(tree->mt_leaves[i].idx, tree->mt_leaves[i].next_idx, idx))
+        {
+            if(leafidx)
+                *leafidx = i;
             return tree->mt_leaves + i;
+        }
     return NULL;
 }
 
-struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx)
+struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
     {
         if(tree->mt_leaves[i].idx == idx ||
            encloses(tree->mt_leaves[i].idx, tree->mt_leaves[i].next_idx, idx))
+        {
+            if(leafidx)
+                *leafidx = i;
             return tree->mt_leaves + i;
+        }
     }
     return NULL;
 }
@@ -308,10 +330,11 @@ struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t i
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
 {
     /* update the leaf first, then use merkle_update */
-    struct iomt_node *leaf = iomt_find_leaf(tree, idx);
+    uint64_t leafidx;
+    struct iomt_node *leaf = iomt_find_leaf(tree, idx, &leafidx);
     leaf->val = newval;
 
-    merkle_update(tree, leaf - tree->mt_leaves, hash_node(leaf), NULL);
+    merkle_update(tree, leafidx, hash_node(leaf), NULL);
 }
 
 void iomt_update_leaf_full(struct iomt *tree, uint64_t leafidx,

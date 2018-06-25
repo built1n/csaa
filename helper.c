@@ -53,14 +53,15 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
                               uint64_t idx,
                               hash_t *hmac_out)
 {
-    struct iomt_node *node = iomt_find_leaf_or_encloser(tree, idx);
+    uint64_t leafidx;
+    struct iomt_node *node = iomt_find_leaf_or_encloser(tree, idx, &leafidx);
 
     if(!node)
         return cert_null;
 
     /* find the complement */
     int *orders;
-    hash_t *comp = merkle_complement(tree, node - tree->mt_leaves, &orders);
+    hash_t *comp = merkle_complement(tree, leafidx, &orders);
 
     struct tm_cert cert;
 

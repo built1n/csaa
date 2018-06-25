@@ -118,10 +118,13 @@ struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t l
 void iomt_fill(struct iomt *tree);
 void iomt_dump(const struct iomt *tree);
 
+hash_t iomt_getroot(const struct iomt *tree);
+struct iomt_node *iomt_get_leaf_by_idx(const struct iomt *tree, uint64_t leafidx);
+
 /* All linear searches... slow! */
-struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx);
-struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx);
-struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx);
+struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
+struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
+struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
 
 int bintree_parent(int idx);
 int bintree_sibling(int idx);
