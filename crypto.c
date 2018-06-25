@@ -2,11 +2,15 @@
 #include "trusted_module.h"
 #include "test.h"
 
-#include <sys/socket.h>
+#include <assert.h>
 #include <unistd.h>
 #include <string.h>
 
+#include <sys/socket.h>
+
+#include <openssl/aes.h>
 #include <openssl/hmac.h>
+#include <openssl/rand.h>
 #include <openssl/sha.h>
 
 /* return true iff [b, bprime] encloses a */
@@ -364,6 +368,8 @@ struct iomt *iomt_new(int logleaves)
 
 struct iomt *iomt_dup(const struct iomt *tree)
 {
+    if(!tree)
+        return NULL;
     struct iomt *newtree = calloc(1, sizeof(struct iomt));
     newtree->mt_leafcount = tree->mt_leafcount;
     newtree->mt_logleaves = tree->mt_logleaves;
@@ -395,6 +401,8 @@ void write_u64(void (*write_fn)(void *userdata, const void *data, size_t len),
     write_fn(userdata, &n, sizeof(n));
 }
 
+#define IOMT_EMPTY (uint64_t)0xFFFFFFFFFFFFFFFFUL
+
 void iomt_serialize(const struct iomt *tree,
                     void (*write_fn)(void *userdata, const void *data, size_t len),
                     void *userdata)
@@ -408,15 +416,17 @@ void iomt_serialize(const struct iomt *tree,
         write_fn(userdata, tree->mt_leaves, sizeof(struct iomt_node) * tree->mt_leafcount);
     }
     else
-        write_u64(write_fn, userdata, 0);
+        write_u64(write_fn, userdata, IOMT_EMPTY);
 }
 
 struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t len),
                               void *userdata)
 {
     uint64_t logleaves = read_u64(read_fn, userdata);
-    if(!logleaves)
+
+    if(logleaves == IOMT_EMPTY)
         return NULL;
+
     struct iomt *tree = iomt_new(logleaves);
 
     read_fn(userdata, tree->mt_nodes, sizeof(hash_t) * (2 * tree->mt_leafcount - 1));
@@ -500,14 +510,19 @@ struct hashstring hash_format(hash_t h, int n)
 
 void iomt_dump(const struct iomt *tree)
 {
-    for(int i = 0; i < tree->mt_leafcount; ++i)
+    if(tree)
     {
-        printf("(%lu, %s, %lu)%s",
-               tree->mt_leaves[i].idx,
-               hash_format(tree->mt_leaves[i].val, 4).str,
-               tree->mt_leaves[i].next_idx,
-               (i == tree->mt_leafcount - 1) ? "\n" : ", ");
+        for(int i = 0; i < tree->mt_leafcount; ++i)
+        {
+            printf("(%lu, %s, %lu)%s",
+                   tree->mt_leaves[i].idx,
+                   hash_format(tree->mt_leaves[i].val, 4).str,
+                   tree->mt_leaves[i].next_idx,
+                   (i == tree->mt_leafcount - 1) ? "\n" : ", ");
+        }
     }
+    else
+        printf("(empty IOMT)\n");
 }
 
 /* convert the first 8 bytes (little endian) to a 64-bit int */
@@ -528,6 +543,12 @@ hash_t u64_to_hash(uint64_t n)
         n >>= 8;
     }
     return ret;
+}
+
+hash_t hash_increment(hash_t h)
+{
+    /* incredibly inefficient... FIXME! */
+    return u64_to_hash(hash_to_u64(h) + 1);
 }
 
 /* simple XOR cipher, so encryption and decryption are symmetric */
@@ -555,9 +576,6 @@ hash_t crypt_secret(hash_t encrypted_secret,
  * forgo any HMAC. */
 hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf)
 {
-    printf("calc_lambda: gamma = %s, buildcode = %s, compose = %s, kf = %s\n",
-           hash_format(gamma, 4).str, hash_format(buildcode->mt_nodes[0], 4).str,
-           hash_format(composefile->mt_nodes[0], 4).str, hash_format(kf, 4).str);
     hash_t buildcode_root = hash_null, composefile_root = hash_null;
     if(buildcode)
         buildcode_root = buildcode->mt_nodes[0];
@@ -576,7 +594,72 @@ hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt
 
     SHA256_Final(h.hash, &ctx);
 
+    printf("calc_lambda: gamma = %s, kf = %s, lambda = %s\n",
+           hash_format(gamma, 4).str, hash_format(kf, 4).str,
+           hash_format(h, 4).str);
     return h;
+}
+
+hash_t generate_nonce(void)
+{
+    hash_t ret;
+    if(!RAND_bytes(ret.hash, sizeof(ret.hash)))
+    {
+        assert(!"Failed to generate nonce");
+    }
+    return ret;
+}
+
+/* Derive a fixed-length key from an arbitrary-length
+ * passphrase. TODO: replace with a real KDF (PBKDF2?) */
+hash_t derive_key(const char *passphrase, hash_t nonce)
+{
+    if(!passphrase || strlen(passphrase) == 0)
+        return hash_null;
+    return hmac_sha256(passphrase, strlen(passphrase),
+                       &nonce, sizeof(nonce));
+}
+
+hash_t calc_kf(hash_t encryption_key, uint64_t file_idx)
+{
+    if(is_zero(encryption_key))
+        return hash_null;
+    return hmac_sha256(&encryption_key, sizeof(encryption_key),
+                       &file_idx, sizeof(file_idx));
+}
+
+void memxor(unsigned char *dest, const unsigned char *b, size_t len)
+{
+    while(len--)
+        *dest++ ^= *b++;
+}
+
+/* symmetric: decryption and encryption are the same operation */
+void crypt_bytes(unsigned char *data, size_t len, hash_t key)
+{
+    /* We use AES256 in CTR mode with a hard-coded IV. We never reuse
+     * keys, as they are generated with a combination of the passphrase
+     * and a nonce. Therefore, it should be reasonably safe to
+     * hard-code the IV: */
+    AES_KEY aes;
+
+    AES_set_encrypt_key((void*)&key, 256, &aes);
+    unsigned char block[16];
+
+    /* We only use the first 16 bytes of the counter. */
+    hash_t counter = u64_to_hash(0);
+
+    size_t i;
+    for(i = 0; i < len; i += 16, data += 16)
+    {
+        AES_ecb_encrypt((void*)&counter, block, &aes, AES_ENCRYPT);
+        memxor(data, block, 16);
+        counter = hash_increment(counter);
+    }
+
+    /* finish up */
+    AES_ecb_encrypt((void*)&counter, block, &aes, AES_ENCRYPT);
+    memxor(data, block, len - i);
 }
 
 /* Generate a signed acknowledgement for successful completion of a

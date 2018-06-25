@@ -3,14 +3,21 @@
 
 /* Usage:
  *
- * $ ./client [-s <SOCKET>] -k KEY -u USERID COMMAND [PARAMS]
+ * $ ./client [-s <SOCKET>] -u USERID -k USER_KEY COMMAND [PARAMS]
  *
- * Where COMMAND and PARAMS is one of the following:
+ * Where COMMAND and PARAMS are one of the following:
  *   create (takes no parameters)
- *   modifyacl fileidx user_1 acc_1 ... user_n acc_n
- *   modifyfile fileidx buildcode_file compose_file image_file [FILE_KEY]
- *   retrieveinfo fileidx version
- *   retrievefile fileidx version buildcode_out compose_out image_out [FILE_KEY]
+ *
+ *   modifyacl -f FILEIDX USER_1 ACCESS_1 ... USER_n ACCESS_n
+ *   - NOTE: there must be nothing following this command, as everything
+ *           will be interpreted as part of the ACL list.
+ *
+ *   modifyfile -f FILEIDX -i IMAGE_FILE [-ib buildcode_file]
+ *              [-ic compose_file] [--encrypt, -e]
+ *
+ *   retrieveinfo -f FILEIDX [-v VERSION]
+ *
+ *   retrievefile -f FILEIDX [-v VERSION] -o IMAGE_OUT
  */
 
 #define CLIENT
@@ -60,14 +67,27 @@ static int ilog2(int n)
 
 void print_usage(const char *name)
 {
-    printf("Usage: %s [-s <SOCKET>] -k KEY -u USERID COMMAND [PARAMS]\n"
+    printf("Usage:\n"
+           "\n"
+           "$ ./client [-s <SOCKET>] -u USERID -k USER_KEY COMMAND [PARAMS]\n"
            "\n"
            "Where COMMAND and PARAMS are one of the following:\n"
-           " create (takes no parameters)\n"
-           " modifyacl fileidx USER_1 ACCESS_1 ... USER_n ACCESS_n\n"
-           " modifyfile fileidx buildcode_file compose_file image_file [FILE_KEY]\n"
-           " retrieveinfo fileidx version\n"
-           " retrievefile fileidx version buildcode_out compose_out image_out [FILE_KEY]\n", name);
+           "  create (takes no parameters)\n"
+           "\n"
+           "  modifyacl -f FILEIDX USER_1 ACCESS_1 ... USER_n ACCESS_n\n"
+           "  - NOTE: there must be nothing following this command, as everything\n"
+           "          will be interpreted as part of the ACL list.\n"
+           "\n"
+           "  modifyfile -f FILEIDX -i IMAGE_FILE [-ib buildcode_file]\n"
+           "             [-ic compose_file] [--encrypt, -e]\n"
+           "\n"
+           "  retrieveinfo -f FILEIDX [-v VERSION]\n"
+           "\n"
+           "  retrievefile -f FILEIDX [-v VERSION] -o IMAGE_OUT\n");
+    for(int i = 0; i < 10; ++i)
+    {
+        printf("%d %d\n", i, ilog2(i));
+    }
 }
 
 bool parse_args(int argc, char *argv[])
@@ -105,6 +125,63 @@ bool parse_args(int argc, char *argv[])
                 return false;
             }
         }
+        else if(!strcmp(arg, "-f"))
+        {
+            if(++i < argc)
+                cl_request.file_idx = atol(argv[i]);
+            else
+            {
+                parse_args_fail = "Expected file index";
+                return false;
+            }
+        }
+        else if(!strcmp(arg, "-v"))
+        {
+            if(++i < argc)
+                cl_request.retrieve.version = atol(argv[i]);
+            else
+            {
+                parse_args_fail = "Expected version number";
+                return false;
+            }
+        }
+        /* -i and -o are handled identically */
+        else if(!strcmp(arg, "-i") || !strcmp(arg, "-o"))
+        {
+            if(++i < argc)
+                image_path = argv[i];
+            else
+            {
+                parse_args_fail = "Expected image path";
+                return false;
+            }
+        }
+        else if(!strcmp(arg, "-ib"))
+        {
+            if(++i < argc)
+                buildcode_path = argv[i];
+            else
+            {
+                parse_args_fail = "Expected build code";
+                return false;
+            }
+        }
+        else if(!strcmp(arg, "-ic"))
+        {
+            if(++i < argc)
+                compose_path = argv[i];
+            else
+            {
+                parse_args_fail = "Expected compose file";
+                return false;
+            }
+        }
+        else if(!strcmp(arg, "-e") || !strcmp(arg, "--encrypt"))
+        {
+            /* a random nonce will be generated along with this to
+             * form the key */
+            file_key = "a";
+        }
         else if(!strcmp(arg, "-h") || !strcmp(arg, "--help"))
         {
             print_usage(argv[0]);
@@ -128,14 +205,6 @@ bool parse_args(int argc, char *argv[])
             }
             cl_request.type = MODIFY_ACL;
 
-            if(++i < argc)
-                cl_request.modify_acl.file_idx = atol(argv[i]);
-            else
-            {
-                parse_args_fail = "Expected file idx";
-                return false;
-            }
-
             i++;
 
             size_t n = argc - i;
@@ -153,12 +222,13 @@ bool parse_args(int argc, char *argv[])
             /* sort ACL tuples by user id */
             qsort(acl_tuples, n / 2, 2 * sizeof(uint64_t), compare_tuple);
 
-            size_t logleaves = ilog2(n);
+            size_t logleaves = ilog2(n / 2);
 
             /* round up if acl size is not an integer power of 2 */
-            if((1 << logleaves) != n)
+            if((1 << logleaves) != n / 2)
                 logleaves++;
 
+            printf("ACL logleaves = %d, count = %d, mt_leafcount = %d\n", logleaves, n, 1 << logleaves);
             new_acl = iomt_new(logleaves);
             /* now produce IOMT */
             uint64_t first_idx = acl_tuples[0];
@@ -178,20 +248,6 @@ bool parse_args(int argc, char *argv[])
                 return false;
             }
             cl_request.type = MODIFY_FILE;
-
-            if(++i < argc)
-                cl_request.modify_file.file_idx = atol(argv[i]);
-            else
-            {
-                parse_args_fail = "Expected file idx";
-                return false;
-            }
-
-            buildcode_path = argv[++i];
-            compose_path = argv[++i];
-            image_path = argv[++i];
-            if(i + 1 < argc)
-                file_key = argv[++i];
         }
         else if(!strcmp(arg, "retrieveinfo") || !strcmp(arg, "retrievefile"))
         {
@@ -202,31 +258,9 @@ bool parse_args(int argc, char *argv[])
             }
             cl_request.type = RETRIEVE_INFO;
 
-            if(++i < argc)
-                cl_request.retrieve.file_idx = atol(argv[i]);
-            else
-            {
-                parse_args_fail = "Expected file idx";
-                return false;
-            }
-
-            if(++i < argc)
-                cl_request.retrieve.version = atol(argv[i]);
-            else
-            {
-                parse_args_fail = "Expected file version";
-                return false;
-            }
-
             if(!strcmp(arg, "retrievefile"))
             {
                 cl_request.type = RETRIEVE_FILE;
-
-                buildcode_path = argv[++i];
-                compose_path = argv[++i];
-                image_path = argv[++i];
-                if(i + 1 < argc)
-                    file_key = argv[++i];
             }
         }
         else
@@ -236,7 +270,36 @@ bool parse_args(int argc, char *argv[])
         }
     }
     if(cl_request.type != USERREQ_NONE && user_id != 0 && userkey != NULL)
+    {
+        if(cl_request.type > CREATE_FILE)
+        {
+            if(!cl_request.file_idx)
+            {
+                parse_args_fail = "No file index specified";
+                return false;
+            }
+        }
+        else
+        {
+            if(cl_request.file_idx)
+            {
+                parse_args_fail = "Index specified for create";
+                return false;
+            }
+        }
+
+        if(cl_request.type == MODIFY_FILE ||
+           cl_request.type == RETRIEVE_FILE)
+        {
+            if(!image_path)
+            {
+                parse_args_fail = "No image file specified";
+                return false;
+            }
+        }
+
         return true;
+    }
     else
     {
         parse_args_fail = "Missing required parameter (either command, user ID, or user key)";
@@ -283,7 +346,7 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req)
         break;
     }
     default:
-        break;
+        return req_null;
     }
 
     printf("Signing request\n");
@@ -367,33 +430,82 @@ bool exec_request(int fd, const struct user_request *req,
 
         if(hash_equals(hmac, hmac_sha256(&verinfo, sizeof(verinfo), user_key, keylen)))
         {
+            if(verinfo.idx != 0)
+            {
+                struct iomt *acl = iomt_deserialize(read_from_fd, &fd);
+                printf("ACL: ");
+                iomt_dump(acl);
+                iomt_free(acl);
+            }
+
             *verinfo_out = verinfo;
             return true;
         }
+
         return false;
     }
     case RETRIEVE_FILE:
     {
-        hash_t encrypted_secret;
+        hash_t encrypted_secret, kf;
         recv(fd, &encrypted_secret, sizeof(encrypted_secret), MSG_WAITALL);
+        recv(fd, &kf, sizeof(kf), MSG_WAITALL);
 
-        *secret_out = crypt_secret(encrypted_secret,
-                                   req->retrieve.file_idx,
-                                   req->retrieve.version,
-                                   user_key, keylen);
+        hash_t pad = hmac_sha256(&kf, sizeof(kf),
+                                 user_key, keylen);
+        *secret_out = hash_xor(encrypted_secret, pad);
 
         *buildcode = iomt_deserialize(read_from_fd, &fd);
         *composefile = iomt_deserialize(read_from_fd, &fd);
 
         recv(fd, file_len, sizeof(*file_len), MSG_WAITALL);
 
-        *file_contents_out = malloc(*file_len);
-        recv(fd, *file_contents_out, *file_len, MSG_WAITALL);
+        if(*file_len)
+        {
+            *file_contents_out = malloc(*file_len);
+            recv(fd, *file_contents_out, *file_len, MSG_WAITALL);
+        }
+        else
+        {
+            *file_contents_out = NULL;
+            return false;
+        }
         return true;
     }
     default:
         assert(false);
     }
+}
+
+/* set version = 0 to get latest version */
+struct version_info request_verinfo(int fd, uint64_t user_id,
+                                    const char *user_key, size_t keylen,
+                                    uint64_t file_idx, uint64_t version)
+
+{
+    struct user_request req;
+    req.type = RETRIEVE_INFO;
+    req.user_id = user_id;
+    req.retrieve.file_idx = file_idx;
+    req.retrieve.version = version;
+
+    struct version_info verinfo;
+
+    bool rc = exec_request(fd, &req,
+                           NULL,
+                           NULL,
+                           NULL,
+                           NULL, 0,
+                           NULL,
+                           &verinfo,
+                           user_key, keylen,
+                           NULL,
+                           NULL,
+                           NULL,
+                           NULL,
+                           NULL);
+    if(rc)
+        return verinfo;
+    return verinfo_null;
 }
 
 int connect_to_service(const char *sockpath)
@@ -436,13 +548,16 @@ void *load_file(const char *path, size_t *len)
 
 void write_file(const char *path, const void *contents, size_t len)
 {
-    FILE *f = fopen(path, "w");
-    fwrite(contents, 1, len, f);
-    fclose(f);
+    if(contents)
+    {
+        FILE *f = fopen(path, "w");
+        fwrite(contents, 1, len, f);
+        fclose(f);
+    }
 }
 
 bool server_request(const char *sockpath,
-                    const char *userkey, uint64_t user_id,
+                    const char *user_key, uint64_t user_id,
                     struct user_request req,
                     struct iomt *new_acl,
                     const char *buildcode_path,
@@ -450,28 +565,65 @@ bool server_request(const char *sockpath,
                     const char *image_path,
                     const char *file_key)
 {
-    int fd = connect_to_service(sockpath);
+    struct iomt *buildcode = NULL, *composefile = NULL;
+    void *file_contents = NULL;
+    size_t file_len = 0;
+    hash_t secret = hash_null;
 
+    /* Fill in rest of request structure */
     req.user_id = user_id;
 
-    struct iomt *buildcode = NULL, *composefile = NULL;
     if(req.type == MODIFY_FILE)
     {
         /* these can safely take NULLs */
         buildcode = iomt_from_lines(buildcode_path);
         composefile = iomt_from_lines(compose_path);
+
+        if(image_path)
+        {
+            file_contents = load_file(image_path, &file_len);
+
+            /* Encrypt file and secret */
+            if(file_key)
+            {
+                /* Get version */
+                int fd = connect_to_service(sockpath);
+                struct version_info verinfo = request_verinfo(fd, user_id,
+                                                              user_key, strlen(user_key),
+                                                              req.modify_file.file_idx,
+                                                              0);
+                close(fd);
+
+                /* failure */
+                if(verinfo.idx == 0)
+                {
+                    printf("Could not get version info.\n");
+                    return false;
+                }
+
+                /* We use a block cipher in CTR mode and can thus
+                 * avoid having to use an IV (as long as we never
+                 * re-use keys) */
+                hash_t nonce = generate_nonce();
+                secret = derive_key(file_key, nonce);
+
+                /* encrypt file (presumably a symmetric cipher) */
+                crypt_bytes(file_contents, file_len, secret);
+
+                printf("Derived file secret: %s\n", hash_format(secret, 4).str);
+                req.modify_file.kf = calc_kf(secret, req.modify_file.file_idx);
+                req.modify_file.encrypted_secret = crypt_secret(secret,
+                                                                req.modify_file.file_idx,
+                                                                verinfo.max_version + 1,
+                                                                user_key, user_id);
+            }
+        }
     }
-
-    void *file_contents = NULL;
-    size_t file_len = 0;
-    hash_t secret = hash_null;
-    if(image_path && req.type == MODIFY_FILE)
-        file_contents = load_file(image_path, &file_len);
-
-    /* TODO: encrypt file */
 
     struct version_info verinfo;
     struct tm_request tmreq;
+
+    int fd = connect_to_service(sockpath);
 
     bool success = exec_request(fd, &req,
                                 req.type == MODIFY_ACL ? new_acl : NULL,
@@ -481,8 +633,8 @@ bool server_request(const char *sockpath,
                                 req.type == MODIFY_FILE ? file_len : 0,
                                 req.type <= MODIFY_ACL ? &tmreq : NULL,
                                 req.type == RETRIEVE_INFO ? &verinfo : NULL,
-                                req.type >= RETRIEVE_INFO ? userkey : NULL,
-                                req.type >= RETRIEVE_INFO ? strlen(userkey) : 0,
+                                req.type >= RETRIEVE_INFO ? user_key : NULL,
+                                req.type >= RETRIEVE_INFO ? strlen(user_key) : 0,
                                 req.type == RETRIEVE_FILE ? &buildcode : NULL,
                                 req.type == RETRIEVE_FILE ? &composefile : NULL,
                                 req.type == RETRIEVE_FILE ? &secret : NULL,
@@ -509,11 +661,19 @@ bool server_request(const char *sockpath,
     case RETRIEVE_FILE:
     {
         hash_t gamma = sha256(file_contents, file_len);
-        hash_t lambda = calc_lambda(gamma, buildcode, composefile, req.modify_file.kf);
 
+        hash_t kf = calc_kf(secret, req.retrieve.file_idx);
+
+        /* We should recalculate the roots of the two IOMTs ourselves
+         * to be sure */
+        hash_t lambda = calc_lambda(gamma, buildcode, composefile, kf);
+
+        printf("Decrypted file secret as %s\n", hash_format(secret, 4).str);
         printf("File lambda = %s\n", hash_format(lambda, 4).str);
 
-        /* TODO: decrypt file */
+        if(!is_zero(kf))
+            crypt_bytes(file_contents, file_len, secret);
+
         printf("Writing image file to %s.\n", image_path);
         write_file(image_path, file_contents, file_len);
         /* What about build code? We only have the IOMT, not the actual contents. */

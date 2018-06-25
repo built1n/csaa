@@ -155,6 +155,11 @@ int read_from_fd(void *userdata, void *buf, size_t len);
 
 void dump_versioninfo(const struct version_info *verinfo);
 
+void crypt_bytes(unsigned char *data, size_t len, hash_t key);
+hash_t generate_nonce(void);
+hash_t derive_key(const char *passphrase, hash_t nonce);
+hash_t calc_kf(hash_t encryption_key, uint64_t file_idx);
+
 /* self-test */
 void crypto_test(void);
 #endif

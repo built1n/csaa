@@ -35,6 +35,7 @@ struct user_request {
     enum { USERREQ_NONE = 0, CREATE_FILE, MODIFY_FILE, MODIFY_ACL, RETRIEVE_INFO, RETRIEVE_FILE } type;
     uint64_t user_id;
     union {
+        uint64_t file_idx;
         struct {
             uint64_t file_idx;
             /* ACL IOMT will follow */
@@ -57,8 +58,8 @@ struct user_request {
             /* same structure for retrieve file and retrieve info */
             uint64_t file_idx, version;
             /* service will respond with either version_info struct,
-             * plus HMAC, or file contents and key (which the client
-             * can verify themselves) */
+             * the serialized ACL, and an HMAC, or file contents and
+             * key (which the client can verify themselves) */
         } retrieve;
     };
 } __attribute__((packed));
@@ -110,7 +111,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 struct version_info sp_fileinfo(struct service_provider *sp,
                                 uint64_t user_id, uint64_t file_idx,
                                 uint64_t version,
-                                hash_t *hmac);
+                                hash_t *hmac,
+                                struct iomt **acl_out);
 
 /* Again, version=0 selects the latest version. */
 void *sp_retrieve_file(struct service_provider *sp,
@@ -118,6 +120,7 @@ void *sp_retrieve_file(struct service_provider *sp,
                        uint64_t file_idx,
                        uint64_t version,
                        hash_t *encrypted_secret,
+                       hash_t *kf,
                        struct iomt **buildcode,
                        struct iomt **composefile,
                        size_t *len);

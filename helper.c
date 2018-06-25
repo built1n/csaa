@@ -75,7 +75,8 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
     }
     else
     {
-        /* node does not exist */
+        /* We have an encloser node, indicating that the requested
+         * node does not exist. */
         cert_rv(tm,
                 node,
                 comp, orders, tree->mt_logleaves,

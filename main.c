@@ -46,7 +46,7 @@ void run_tests(void)
 
 int main()
 {
-    //run_tests();
+    run_tests();
 
     const char *socket_name = "socket";
     int sockfd;
@@ -56,11 +56,14 @@ int main()
         return 1;
     }
 
+    printf("Listening on '%s'\n", socket_name);
+
     cleanup_socket = socket_name;
 
     atexit(cleanup);
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGSEGV, signal_handler);
 
     sp_main(sockfd);
 }

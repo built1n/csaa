@@ -562,7 +562,8 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                 uint64_t user_id,
                                 uint64_t file_idx,
                                 uint64_t version,
-                                hash_t *hmac)
+                                hash_t *hmac,
+                                struct iomt **acl_out)
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
@@ -647,6 +648,9 @@ struct version_info sp_fileinfo(struct service_provider *sp,
     else
         ver = NULL;
 
+    if(acl_out)
+        *acl_out = iomt_dup(rec->acl);
+
     return tm_verify_fileinfo(sp->tm,
                               user_id,
                               &rv1, rv1_hmac,
@@ -658,25 +662,28 @@ struct version_info sp_fileinfo(struct service_provider *sp,
 
 /* This file retrieves the file given by file_idx for a given
  * user. *encrypted_secret will be set to the encryption key XOR'd
- * with HMAC(f | c_f, K). The returned value is dynamically allocated
- * and must be freed by the caller. This function returns NULL upon
- * failure. An authenticated proof that the request cannot be
- * satisfied can be obtained by calling sp_fileinfo. */
+ * with HMAC(kf, K). kf will be returned via the *kf pointer. The
+ * returned value is dynamically allocated and must be freed by the
+ * caller. This function returns NULL upon failure. An authenticated
+ * proof that the request cannot be satisfied can be obtained by
+ * calling sp_fileinfo. */
 void *sp_retrieve_file(struct service_provider *sp,
                        uint64_t user_id,
                        uint64_t file_idx,
                        uint64_t version,
                        hash_t *encrypted_secret,
+                       hash_t *kf,
                        struct iomt **buildcode,
                        struct iomt **composefile,
                        size_t *len)
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
-    if(!rec->nversions)
+    if(!rec || !rec->nversions)
     {
         /* Newly created file, no contents. We don't bother to set
-         * *encrypted_secret or *len. */
+         * *encrypted_secret or *len. Or, file does not exist. */
+        *len = 0;
         return NULL;
     }
 
@@ -702,6 +709,9 @@ void *sp_retrieve_file(struct service_provider *sp,
                                &rec->fr_cert, rec->fr_hmac,
                                ver->encrypted_secret, ver->kf);
     }
+
+    if(kf)
+        *kf = ver->kf;
 
     if(len)
         *len = ver->contents_len;
@@ -755,6 +765,10 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     {
         printf("Client: modify ACL\n");
         struct iomt *acl = iomt_deserialize(read_from_fd, &cl);
+
+        if(!acl)
+            return;
+
         sp_modifyacl(sp,
                      user_req.user_id,
                      get_client_signature,
@@ -801,37 +815,53 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     case RETRIEVE_INFO:
     {
         printf("Client: retrieve info\n");
+        struct iomt *acl = NULL;
         struct version_info verinfo = sp_fileinfo(sp,
                                                   user_req.user_id,
                                                   user_req.retrieve.file_idx,
                                                   user_req.retrieve.version,
-                                                  &ack_hmac);
+                                                  &ack_hmac,
+                                                  &acl);
         write(cl, &verinfo, sizeof(verinfo));
         write(cl, &ack_hmac, sizeof(ack_hmac));
+
+        if(acl && verinfo.idx != 0)
+        {
+            iomt_serialize(acl, write_to_fd, &cl);
+            iomt_free(acl);
+        }
+        else
+        {
+            printf("failed: %s\n", tm_geterror());
+        }
+
         break;
     }
     case RETRIEVE_FILE:
     {
         printf("Client: retrieve file\n");
-        hash_t encrypted_secret;
-        size_t len;
+        hash_t encrypted_secret = hash_null, kf = hash_null;
+        size_t len = 0;
         struct iomt *buildcode = NULL, *composefile = NULL;
         void *contents = sp_retrieve_file(sp,
                                           user_req.user_id,
                                           user_req.retrieve.file_idx,
                                           user_req.retrieve.version,
                                           &encrypted_secret,
+                                          &kf,
                                           &buildcode,
                                           &composefile,
                                           &len);
         /* write everything (no HMAC; the client should do a
          * RETRIEVE_INFO request separately) */
         write(cl, &encrypted_secret, sizeof(encrypted_secret));
+        write(cl, &kf, sizeof(kf));
         iomt_serialize(buildcode, write_to_fd, &cl);
         iomt_serialize(composefile, write_to_fd, &cl);
 
         write(cl, &len, sizeof(len));
-        write(cl, contents, len);
+        if(contents)
+            write(cl, contents, len);
 
         break;
     }
@@ -921,11 +951,11 @@ void sp_test(void)
 
         hash_t hmac;
         /* check inside range, but empty slot */
-        struct version_info vi = sp_fileinfo(sp, 1, 12, 1, &hmac);
+        struct version_info vi = sp_fileinfo(sp, 1, 12, 1, &hmac, NULL);
         check("Authenticated denial 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         /* check outside range */
-        vi = sp_fileinfo(sp, 1, (1 << sp->iomt->mt_logleaves) + 1, 1, &hmac);
+        vi = sp_fileinfo(sp, 1, (1 << sp->iomt->mt_logleaves) + 1, 1, &hmac, NULL);
         check("Authenticated denial 2", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         /* check in range */
@@ -933,14 +963,17 @@ void sp_test(void)
                          1, /* user */
                          1, /* file */
                          1, /* version */
-                         &hmac);
+                         &hmac,
+                         NULL);
         check("File info retrieval 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         hash_t gamma = sha256("contents", 8);
         hash_t kf = hash_null;
         hash_t lambda = calc_lambda(gamma, buildcode, NULL, kf);
 
-        struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, lambda };
+        struct iomt_node acl_node = { 1, 1, u64_to_hash(3) };
+
+        struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, hash_node(&acl_node), lambda };
         check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
     }
 
@@ -953,6 +986,7 @@ void sp_test(void)
                                           1,
                                           1,
                                           &key,
+                                          NULL,
                                           NULL,
                                           NULL,
                                           &len);
