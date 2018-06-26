@@ -15,34 +15,6 @@ typedef struct hash_t {
     unsigned char hash[32];
 } hash_t;
 
-struct iomt_node {
-    uint64_t idx, next_idx; /* idx cannot be zero */
-    hash_t val; /* all zero indicates placeholder */
-};
-
-struct iomt {
-    int mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
-
-    /* Each level of the IOMT is stored sequentially from left to
-     * right, top to bottom, as follows:
-     *
-     *  [0]: root
-     *  [1]: root left child
-     *  [2]: root right child
-     *  [3]: left child of [1]
-     *  [4]: right child of [1]
-     *  [5]: left child of [2]
-     *  [6]: right child of [2],
-     *
-     * and so on.
-     */
-    hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note
-                       * that the bottom level consists of hashes of
-                       * the leaf nodes. */
-
-    struct iomt_node *mt_leaves;
-};
-
 /* guaranteed to be zero */
 static const struct hash_t hash_null = { { 0 } };
 
@@ -50,7 +22,6 @@ bool encloses(uint64_t b, uint64_t bprime, uint64_t a);
 bool hash_equals(hash_t a, hash_t b);
 bool is_zero(hash_t u);
 
-hash_t hash_node(const struct iomt_node *node);
 hash_t hash_xor(hash_t a, hash_t b);
 
 hash_t sha256(const void *data, size_t datalen);
@@ -77,54 +48,8 @@ int *bintree_complement_ordersonly(int leafidx, int logleaves);
  * given leaf node. Will be ordered from nearest relative to root. */
 int *bintree_ancestors(int leafidx, int logleaves);
 
-hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders);
-
 hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n);
 void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n);
-
-/* This function is prefixed merkle_ because it does not know about
- * any IOMT-specific properties (though it is still passed an iomt
- * struct) */
-void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep);
-
-struct iomt *iomt_new(int logleaves);
-struct iomt *iomt_dup(const struct iomt *tree);
-void iomt_free(struct iomt *tree);
-
-/* Find a leaf with IOMT index `idx' and change its value, propagating
- * up the tree. */
-void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval);
-
-/* Set all the fields of a leaf node (not an IOMT index!) */
-void iomt_update_leaf_full(struct iomt *tree, uint64_t leafidx,
-                           uint64_t new_idx, uint64_t new_next_idx, hash_t new_val);
-void iomt_update_leaf_idx(struct iomt *tree, uint64_t leafidx,
-                          uint64_t new_idx);
-void iomt_update_leaf_nextidx(struct iomt *tree, uint64_t leafidx,
-                              uint64_t new_next_idx);
-void iomt_update_leaf_hash(struct iomt *tree, uint64_t leafidx,
-                           hash_t new_val);
-
-/* Create an IOMT where the leaves are the hash of file lines */
-struct iomt *iomt_from_lines(const char *filename);
-
-void iomt_serialize(const struct iomt *tree,
-                    void (*write_fn)(void *userdata, const void *data, size_t len),
-                    void *userdata);
-
-struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t len),
-                              void *userdata);
-
-void iomt_fill(struct iomt *tree);
-void iomt_dump(const struct iomt *tree);
-
-hash_t iomt_getroot(const struct iomt *tree);
-struct iomt_node *iomt_get_leaf_by_idx(const struct iomt *tree, uint64_t leafidx);
-
-/* All linear searches... slow! */
-struct iomt_node *iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
-struct iomt_node *iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
-struct iomt_node *iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
 
 int bintree_parent(int idx);
 int bintree_sibling(int idx);
@@ -142,6 +67,8 @@ struct hashstring hash_format(hash_t h, int n);
 hash_t crypt_secret(hash_t encrypted_secret,
                     uint64_t file_idx, uint64_t file_version,
                     const void *key, size_t keylen);
+
+struct iomt;
 
 hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf);
 

@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "crypto.h"
+#include "iomt.h"
 
 struct trusted_module;
 struct tm_request;

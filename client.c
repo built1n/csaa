@@ -22,6 +22,7 @@
 
 #define CLIENT
 #include "crypto.h"
+#include "iomt.h"
 #include "service_provider.h"
 #include "trusted_module.h"
 #include "test.h"

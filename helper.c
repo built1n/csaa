@@ -96,9 +96,9 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
  * given in file_node->idx with the user added with level 3 access in
  * the ACL. */
 struct tm_request req_filecreate(const struct trusted_module *tm,
-                                   uint64_t user_id,
-                                   const struct iomt_node *file_node,
-                                   const hash_t *file_comp, const int *file_orders, size_t file_n)
+                                 uint64_t user_id,
+                                 const struct iomt_node *file_node,
+                                 const hash_t *file_comp, const int *file_orders, size_t file_n)
 {
     /* construct a request to create a file */
     struct tm_request req = req_null;

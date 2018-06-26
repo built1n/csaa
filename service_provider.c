@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <sqlite3.h>
+
 #include "crypto.h"
 #include "helper.h"
 #include "service_provider.h"
@@ -20,7 +22,10 @@
 /* arbitrary */
 #define ACL_LOGLEAVES 4
 
+/* free with free_version */
 struct file_version {
+    uint64_t version;
+
     hash_t kf; /* HMAC(key, file_idx) */
     hash_t encrypted_secret; /* XOR'd with HMAC(kf, module secret) */
 
@@ -32,35 +37,25 @@ struct file_version {
 
     /* lines of docker-compose.yml */
     struct iomt *composefile;
-
-    /* image .tar file */
-    void *contents;
-    size_t contents_len;
 };
 
+/* should be free'd with free_record */
 struct file_record {
     uint64_t idx;
     uint64_t version;
     uint64_t counter;
 
-    struct iomt *acl;
+    struct iomt *acl; /* backed by database */
 
     struct tm_cert fr_cert; /* issued by module */
     hash_t fr_hmac;
-
-    /* Version numbers start at 1 and are not stored
-     * explicitly. versions[0] refers to version 1. */
-    struct file_version *versions;
-    int nversions;
 };
 
 struct service_provider {
     struct trusted_module *tm;
 
-    struct file_record *records;
-    size_t nrecords;
-
-    struct iomt *iomt;
+    void *db; /* sqlite3 handle */
+    struct iomt *iomt; /* backed by database */
 };
 
 /* Generate an EQ certificate for inserting a placeholder with index
@@ -133,16 +128,26 @@ struct tm_cert cert_eq(struct service_provider *sp,
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
 }
 
-#if 0
+/* write to file CSAA_FILES/file_idx/version */
+void write_contents(int file_idx, int version,
+                    const void *data, size_t len)
+{
+}
+
+void *read_contents(int file_idx, int version,
+                    size_t *len)
+{
+
+}
+
 void *db_init(const char *filename)
 {
     sqlite3 *db;
     if(sqlite3_open(filename, &db) != SQLITE_OK)
-        return null;
+        return NULL;
 
     return db;
 }
-#endif
 
 /* leaf count will be 2^logleaves */
 struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
@@ -150,7 +155,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
     assert(logleaves > 0);
     struct service_provider *sp = calloc(1, sizeof(*sp));
 
-    //sp->db = db_init("csaa.db");
+    sp->db = db_init("csaa.db");
 
     sp->tm = tm_new(key, keylen);
 
@@ -170,7 +175,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
         /* generate EQ certificate */
         hash_t hmac;
         struct tm_cert eq = cert_eq(sp,
-                                    iomt_get_leaf_by_idx(sp->iomt, i - 1),
+                                    iomt_getleaf(sp->iomt, i - 1),
                                     i - 1,
                                     i, i + 1,
                                     &hmac);
@@ -192,37 +197,48 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 
 static void free_version(struct file_version *ver)
 {
-    free(ver->contents);
-
     iomt_free(ver->buildcode);
     iomt_free(ver->composefile);
 }
 
 static void free_record(struct file_record *rec)
 {
-    for(int i = 0; i < rec->nversions; ++i)
-        free_version(rec->versions + i);
-    free(rec->versions);
     iomt_free(rec->acl);
 }
 
 void sp_free(struct service_provider *sp)
 {
-    for(int i = 0; i < sp->nrecords; ++i)
-        free_record(sp->records + i);
-    free(sp->records);
-
     tm_free(sp->tm);
     iomt_free(sp->iomt);
     free(sp);
 }
 
 /* linear search for record given idx */
-static struct file_record *lookup_record(struct service_provider *sp, int idx)
+static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
-    for(int i = 0; i < sp->nrecords; ++i)
-        if(idx == sp->records[i].idx)
-            return sp->records + i;
+    sqlite3 *handle = sp->db;
+
+    const char *sql = "SELECT * FROM FileRecords WHERE Idx = ?1;";
+
+    sqlite3_stmt *st;
+
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, idx);
+
+    int rc = sqlite3_step(st);
+    if(rc == SQLITE_ROW)
+    {
+        struct file_record *rec = calloc(1, sizeof(struct file_record));
+
+        rec->idx = sqlite3_column_int(st, 0);
+        rec->version = sqlite3_column_int(st, 1);
+        rec->counter = sqlite3_column_int(st, 2);
+        memcpy(&rec->fr_cert, sqlite3_column_blob(st, 3), sizeof(rec->fr_cert));
+        memcpy(&rec->fr_hmac, sqlite3_column_blob(st, 4), sizeof(rec->fr_hmac));
+
+        int acl_logleaves = sqlite3_column_int(st, 5);
+        rec->acl = iomt_new_from_db(sp->db, "ACLNodes", "ACLLeaves", acl_logleaves);
+    }
     return NULL;
 }
 
@@ -230,16 +246,124 @@ static struct file_record *lookup_record(struct service_provider *sp, int idx)
  * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
  * be replaced with a SQL backend.  We do not check to ensure that
  * there are no duplicate file indices; that is up to the caller. */
-static void append_record(struct service_provider *sp, const struct file_record *rec)
+static void insert_record(struct service_provider *sp, const struct file_record *rec)
 {
-    sp->records = realloc(sp->records, sizeof(struct file_record) * ++sp->nrecords);
-    sp->records[sp->nrecords - 1] = *rec;
+    sqlite3 *handle = sp->db;
+
+    const char *sql = "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 )";
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, rec->idx);
+    sqlite3_bind_int(st, 2, rec->version);
+    sqlite3_bind_int(st, 3, rec->counter);
+    sqlite3_bind_blob(st, 4, &rec->fr_cert, sizeof(rec->fr_cert), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 5, &rec->fr_hmac, sizeof(rec->fr_hmac), SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
+
+    assert(sqlite3_step(st) == SQLITE_DONE);
+
+    sqlite3_finalize(st);
 }
 
-static void append_version(struct file_record *rec, const struct file_version *ver)
+/* Should we insert sorted (for O(logn) lookup), or just at the end to
+ * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
+ * be replaced with a SQL backend.  We do not check to ensure that
+ * there are no duplicate file indices; that is up to the caller. */
+static void update_record(struct service_provider *sp,
+                          const struct file_record *rec)
 {
-    rec->versions = realloc(rec->versions, sizeof(struct file_version) * ++rec->nversions);
-    rec->versions[rec->nversions - 1] = *ver;
+    sqlite3 *handle = sp->db;
+
+    const char *sql = "UPDATE FileRecords SET Idx = ?1, Version = ?2, Counter = ?3, Cert = ?4, HMAC = ?5, ACL_logleaves = ?6 WHERE Idx = ?7";
+
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, rec->idx);
+    sqlite3_bind_int(st, 2, rec->version);
+    sqlite3_bind_int(st, 3, rec->counter);
+    sqlite3_bind_blob(st, 4, &rec->fr_cert, sizeof(rec->fr_cert), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 5, &rec->fr_hmac, sizeof(rec->fr_hmac), SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
+    sqlite3_bind_int(st, 6, rec->idx);
+
+    assert(sqlite3_step(st) == SQLITE_DONE);
+
+    sqlite3_finalize(st);
+}
+
+static void insert_version(struct service_provider *sp,
+                           const struct file_record *rec,
+                           const struct file_version *ver)
+{
+    sqlite3 *handle = sp->db;
+
+    const char *sql = "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 ?7 ?8 )";
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, rec->idx);
+    sqlite3_bind_int(st, 2, ver->version);
+    sqlite3_bind_blob(st, 3, &ver->kf, sizeof(ver->kf), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 4, &ver->encrypted_secret, sizeof(ver->encrypted_secret), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 5, &ver->vr_cert, sizeof(ver->vr_cert), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 6, &ver->vr_hmac, sizeof(ver->vr_hmac), SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 7, ver->buildcode->mt_logleaves);
+    sqlite3_bind_int(st, 8, ver->composefile->mt_logleaves);
+
+    assert(sqlite3_step(st) == SQLITE_DONE);
+
+    sqlite3_finalize(st);
+}
+
+static int count_versions(struct service_provider *sp,
+                          uint64_t file_idx)
+{
+    sqlite3 *handle = sp->db;
+
+    const char *sql = "SELECT COUNT(*) FROM Versions WHERE FileIdx = ?1;";
+
+    sqlite3_stmt *st;
+
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, file_idx);
+
+    /* praying it works */
+    return sqlite3_column_int(st, 0);
+}
+
+static struct file_version *lookup_version(struct service_provider *sp,
+                                           uint64_t file_idx,
+                                           uint64_t version)
+{
+    sqlite3 *handle = sp->db;
+
+    if(!version)
+        version = count_versions(sp, file_idx);
+
+    const char *sql = "SELECT * FROM Versions WHERE FileIdx = ?1 AND Version = ?2;";
+
+    sqlite3_stmt *st;
+
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_bind_int(st, 1, file_idx);
+    sqlite3_bind_int(st, 2, version);
+
+    int rc = sqlite3_step(st);
+    if(rc == SQLITE_ROW)
+    {
+        struct file_version *ver = calloc(1, sizeof(struct file_version));
+
+        ver->version = sqlite3_column_int(st, 1);
+        memcpy(&ver->kf, sqlite3_column_blob(st, 2), sizeof(ver->kf));
+        memcpy(&ver->encrypted_secret, sqlite3_column_blob(st, 3), sizeof(ver->encrypted_secret));
+        memcpy(&ver->vr_cert, sqlite3_column_blob(st, 4), sizeof(ver->vr_cert));
+        memcpy(&ver->vr_hmac, sqlite3_column_blob(st, 5), sizeof(ver->vr_hmac));
+
+        int bc_logleaves = sqlite3_column_int(st, 6);
+        int cf_logleaves = sqlite3_column_int(st, 7);
+        ver->buildcode = iomt_new_from_db(sp->db, "BCNodes", "BCLeaves", bc_logleaves);
+        ver->composefile = iomt_new_from_db(sp->db, "CFNodes", "CFLeaves", cf_logleaves);
+    }
+    return NULL;
 }
 
 /* This does the majority of the work that actually modifies or
@@ -281,11 +405,12 @@ struct tm_cert sp_request(struct service_provider *sp,
     {
         /* update the corresponding file record */
         struct file_record *rec = lookup_record(sp, fr.fr.idx);
+
         bool need_insert = false;
         if(!rec)
         {
-            rec = calloc(1, sizeof(struct file_record));
             need_insert = true;
+            rec = calloc(1, sizeof(struct file_record));
         }
 
         rec->idx = fr.fr.idx;
@@ -340,22 +465,20 @@ struct tm_cert sp_request(struct service_provider *sp,
 
             if(encrypted_contents)
             {
-                /* duplicate */
-                ver.contents = malloc(contents_len);
-                memcpy(ver.contents, encrypted_contents, contents_len);
-                ver.contents_len = contents_len;
+                /* write to disk */
+                write_contents(fr.fr.idx, fr.fr.version,
+                               encrypted_contents, contents_len);
             }
 
-            append_version(rec, &ver);
+            insert_version(sp, rec, &ver);
         }
 
         if(need_insert)
-        {
-            append_record(sp, rec);
+            insert_record(sp, rec);
+        else
+            update_record(sp, rec);
 
-            /* append_record will make a copy */
-            free(rec);
-        }
+        free_record(rec);
 
         /* update our tree */
         iomt_update(sp->iomt, req->idx, u64_to_hash(fr.fr.counter));
@@ -385,7 +508,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
     /* Find an empty leaf node */
     for(i = 0; i < sp->iomt->mt_leafcount; ++i)
     {
-        if(is_zero(iomt_get_leaf_by_idx(sp->iomt, i)->val))
+        if(is_zero(iomt_getleaf(sp->iomt, i).val))
             break;
     }
 
@@ -405,7 +528,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
 
     struct tm_request req = req_filecreate(sp->tm,
                                            user_id,
-                                           iomt_get_leaf_by_idx(sp->iomt, i),
+                                           iomt_getleaf(sp->iomt, i),
                                            file_comp, file_orders, sp->iomt->mt_logleaves);
 
     hash_t req_hmac = sign_request(userdata, &req);
@@ -597,7 +720,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
 
             /* Placeholder exists. */
             rv1 = cert_rv(sp->tm,
-                          iomt_get_leaf_by_idx(sp->iomt, file_idx - 1),
+                          iomt_getleaf(sp->iomt, file_idx - 1),
                           comp, orders, sp->iomt->mt_logleaves,
                           &rv1_hmac,
                           0, NULL, NULL);
@@ -611,7 +734,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
             hash_t *comp = merkle_complement(sp->iomt, sp->iomt->mt_leafcount - 1, &orders);
 
             cert_rv(sp->tm,
-                    iomt_get_leaf_by_idx(sp->iomt, sp->iomt->mt_leafcount - 1),
+                    iomt_getleaf(sp->iomt, sp->iomt->mt_leafcount - 1),
                     comp, orders, sp->iomt->mt_logleaves,
                     NULL,
                     file_idx, &rv1, &rv1_hmac);
@@ -643,22 +766,21 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                         user_id,
                                         &rv2_hmac);
 
-    struct file_version *ver;
-    if(rec->nversions > 0)
-        ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
-    else
-        ver = NULL;
+    struct file_version *ver = lookup_version(sp, rec->idx, version);
 
     if(acl_out)
         *acl_out = iomt_dup(rec->acl);
 
-    return tm_verify_fileinfo(sp->tm,
-                              user_id,
-                              &rv1, rv1_hmac,
-                              &rv2, rv2_hmac,
-                              &rec->fr_cert, rec->fr_hmac,
-                              ver ? &ver->vr_cert : NULL, ver ? ver->vr_hmac : hash_null,
-                              hmac);
+    struct version_info ret = tm_verify_fileinfo(sp->tm,
+                                                 user_id,
+                                                 &rv1, rv1_hmac,
+                                                 &rv2, rv2_hmac,
+                                                 &rec->fr_cert, rec->fr_hmac,
+                                                 ver ? &ver->vr_cert : NULL, ver ? ver->vr_hmac : hash_null,
+                                                 hmac);
+    free_version(ver);
+
+    return ret;
 }
 
 /* This file retrieves the file given by file_idx for a given
@@ -680,7 +802,7 @@ void *sp_retrieve_file(struct service_provider *sp,
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
-    if(!rec || !rec->nversions)
+    if(!rec || count_versions(sp, file_idx))
     {
         /* Newly created file, no contents. We don't bother to set
          * *encrypted_secret or *len. Or, file does not exist. */
@@ -688,7 +810,10 @@ void *sp_retrieve_file(struct service_provider *sp,
         return NULL;
     }
 
-    struct file_version *ver = &rec->versions[version ? version - 1 : rec->nversions - 1];
+    if(!version)
+        version = count_versions(sp, file_idx);
+
+    struct file_version *ver = lookup_version(sp, file_idx, version);
 
     hash_t rv1_hmac, rv2_hmac;
     struct tm_cert rv1 = cert_rv_by_idx(sp->tm, sp->iomt, file_idx, &rv1_hmac);
@@ -696,6 +821,7 @@ void *sp_retrieve_file(struct service_provider *sp,
 
     if(hash_to_u64(rv2.rv.val) < 1)
     {
+        free_version(ver);
         /* no permissions; don't return file contents */
         return NULL;
     }
@@ -714,18 +840,15 @@ void *sp_retrieve_file(struct service_provider *sp,
     if(kf)
         *kf = ver->kf;
 
-    if(len)
-        *len = ver->contents_len;
-
-    /* duplicate */
-    void *ret = malloc(ver->contents_len);
-    memcpy(ret, ver->contents, ver->contents_len);
+    void *ret = read_contents(file_idx, version, len);
 
     /* duplicate compose and build files */
     if(buildcode)
         *buildcode = iomt_dup(ver->buildcode);
     if(composefile)
         *composefile = iomt_dup(ver->composefile);
+
+    free_version(ver);
 
     return ret;
 }
