@@ -183,7 +183,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
                                     i - 1,
                                     i, i + 1,
                                     &hmac);
-        //assert(eq.type == EQ);
+        assert(eq.type == EQ);
 
         /* update previous leaf's index */
         iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
@@ -193,7 +193,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
          * next node, if any */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
 
-        //assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+        assert(tm_set_equiv_root(sp->tm, &eq, hmac));
     }
 
     return sp;
@@ -333,6 +333,8 @@ static int count_versions(struct service_provider *sp,
 
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
     sqlite3_bind_int(st, 1, file_idx);
+
+    assert(sqlite3_step(st) == SQLITE_ROW);
 
     /* praying it works */
     return sqlite3_column_int(st, 0);
