@@ -139,7 +139,7 @@ struct tm_cert tm_cert_combine(const struct trusted_module *tm,
 struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
                              const struct tm_cert *nu_encl, hash_t hmac_encl,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
-                             const struct iomt_node *encloser,
+                             struct iomt_node encloser,
                              uint64_t a, hash_t *hmac_out);
 
 /* nu must be of the form [x,y,x,y] to indicate that x is a child of y */
@@ -148,7 +148,7 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
  * y*/
 struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
-                                     const struct iomt_node *node,
+                                     struct iomt_node node,
                                      hash_t *hmac_out,
                                      uint64_t b,
                                      struct tm_cert *nonexist,
@@ -156,7 +156,7 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
 
 struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t nu_hmac,
-                                     const struct iomt_node *node,
+                                     struct iomt_node node,
                                      hash_t new_val,
                                      hash_t *hmac_out);
 

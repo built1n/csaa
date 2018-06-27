@@ -7,43 +7,51 @@ struct iomt_node {
     hash_t val; /* all zero indicates placeholder */
 };
 
+/* indices cannot be zero */
+static const struct iomt_node node_null = { 0, 0, hash_null };
+
+/* Each level of the IOMT is stored sequentially from left to
+ * right, top to bottom, as follows:
+ *
+ *  [0]: root
+ *  [1]: root left child
+ *  [2]: root right child
+ *  [3]: left child of [1]
+ *  [4]: right child of [1]
+ *  [5]: left child of [2]
+ *  [6]: right child of [2],
+ *
+ * and so on.
+ */
 struct iomt {
-    bool in_memory;
-
-    void *db;
-    const char *nodes_table, leaves_table;
-
-    /* the IOMT code will use nodes with key1_name = key1_val and (if
-     * not NULL) key2_name = key2_val */
-    const char *key1_name, *key2_name;
-    int key1_val, key2_val;
-
     int mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
 
-    /* The following members are valid only if in_memory ==
-     * true... really should use a union here: */
+    bool in_memory;
 
-    /* Each level of the IOMT is stored sequentially from left to
-     * right, top to bottom, as follows:
-     *
-     *  [0]: root
-     *  [1]: root left child
-     *  [2]: root right child
-     *  [3]: left child of [1]
-     *  [4]: right child of [1]
-     *  [5]: left child of [2]
-     *  [6]: right child of [2],
-     *
-     * and so on.
-     */
-    hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note
-                       * that the bottom level consists of hashes of
-                       * the leaf nodes. */
+    union {
+        struct {
+            void *db;
+            const char *nodes_table, *leaves_table;
 
-    struct iomt_node *mt_leaves;
+            /* the IOMT code will use nodes with key1_name = key1_val and (if
+             * not NULL) key2_name = key2_val */
+            const char *key1_name, *key2_name;
+            int key1_val, key2_val;
+        } db;
+        struct {
+            hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note
+                               * that the bottom level consists of hashes of
+                               * the leaf nodes. */
+
+            struct iomt_node *mt_leaves;
+        } mem;
+    };
 };
 
-hash_t hash_node(const struct iomt_node *node);
+hash_t hash_node(struct iomt_node node);
+
+hash_t *lookup_nodes(const struct iomt *tree, const int *indices, int n);
+void restore_nodes(struct iomt *tree, const int *indices, const hash_t *values, int n);
 
 hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders);
 

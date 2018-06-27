@@ -11,16 +11,16 @@
 #include "trusted_module.h"
 
 struct tm_cert cert_ru(const struct trusted_module *tm,
-                       const struct iomt_node *node, hash_t new_val,
+                       struct iomt_node node, hash_t new_val,
                        const hash_t *comp, const int *orders, size_t n,
                        hash_t *hmac_out)
 {
-    struct iomt_node new_node = *node;
+    struct iomt_node new_node = node;
     new_node.val = new_val;
     hash_t nu_hmac;
     struct tm_cert nu = tm_cert_node_update(tm,
                                             hash_node(node),
-                                            hash_node(&new_node),
+                                            hash_node(new_node),
                                             comp, orders, n,
                                             &nu_hmac);
 
@@ -28,7 +28,7 @@ struct tm_cert cert_ru(const struct trusted_module *tm,
 }
 
 struct tm_cert cert_rv(const struct trusted_module *tm,
-                       const struct iomt_node *node,
+                       struct iomt_node node,
                        const hash_t *comp, const int *orders, size_t n,
                        hash_t *hmac_out,
                        uint64_t b,
@@ -54,9 +54,9 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
                               hash_t *hmac_out)
 {
     uint64_t leafidx;
-    struct iomt_node *node = iomt_find_leaf_or_encloser(tree, idx, &leafidx);
+    struct iomt_node node = iomt_find_leaf_or_encloser(tree, idx, &leafidx);
 
-    if(!node)
+    if(!node.idx)
         return cert_null;
 
     /* find the complement */
@@ -65,7 +65,7 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
 
     struct tm_cert cert;
 
-    if(idx == node->idx)
+    if(idx == node.idx)
     {
         /* node exists */
         cert = cert_rv(tm,
@@ -97,19 +97,19 @@ struct tm_cert cert_rv_by_idx(const struct trusted_module *tm,
  * the ACL. */
 struct tm_request req_filecreate(const struct trusted_module *tm,
                                  uint64_t user_id,
-                                 const struct iomt_node *file_node,
+                                 struct iomt_node file_node,
                                  const hash_t *file_comp, const int *file_orders, size_t file_n)
 {
     /* construct a request to create a file */
     struct tm_request req = req_null;
-    req.idx = file_node->idx;
+    req.idx = file_node.idx;
     req.user_id = user_id;
     req.type = ACL_UPDATE;
     req.counter = 0;
 
     /* construct ACL with a single element (the user, with full access) */
     struct iomt_node acl_node = (struct iomt_node) { user_id, user_id, u64_to_hash(3) };
-    req.val = merkle_compute(hash_node(&acl_node), NULL, NULL, 0);
+    req.val = merkle_compute(hash_node(acl_node), NULL, NULL, 0);
 
     hash_t one = u64_to_hash(1);
 
@@ -133,21 +133,21 @@ struct tm_request req_filecreate(const struct trusted_module *tm,
  * contents, given the previously generated FR certificate, and the
  * ACL node giving the user's access rights. */
 struct tm_request req_filemodify(const struct trusted_module *tm,
-                                   const struct tm_cert *fr_cert, hash_t fr_hmac,
-                                   const struct iomt_node *file_node,
-                                   const hash_t *file_comp, const int *file_orders, size_t file_n,
-                                   const struct iomt_node *acl_node,
-                                   const hash_t *acl_comp, const int *acl_orders, size_t acl_n,
-                                   hash_t fileval)
+                                 const struct tm_cert *fr_cert, hash_t fr_hmac,
+                                 struct iomt_node file_node,
+                                 const hash_t *file_comp, const int *file_orders, size_t file_n,
+                                 struct iomt_node acl_node,
+                                 const hash_t *acl_comp, const int *acl_orders, size_t acl_n,
+                                 hash_t fileval)
 {
     /* modification */
     struct tm_request req = req_null;
     req.type = FILE_UPDATE;
 
-    req.idx = file_node->idx;
-    req.counter = hash_to_u64(file_node->val);
+    req.idx = file_node.idx;
+    req.counter = hash_to_u64(file_node.val);
 
-    req.user_id = acl_node->idx;
+    req.user_id = acl_node.idx;
 
     req.modify.fr_cert = *fr_cert;
     req.modify.fr_hmac = fr_hmac;
@@ -172,20 +172,20 @@ struct tm_request req_filemodify(const struct trusted_module *tm,
  * parameters as req_filemodify(), except the hash is the root of the
  * new ACL. */
 struct tm_request req_aclmodify(const struct trusted_module *tm,
-                                  const struct tm_cert *fr_cert, hash_t fr_hmac,
-                                  const struct iomt_node *file_node,
-                                  const hash_t *file_comp, const int *file_orders, size_t file_n,
-                                  const struct iomt_node *oldacl_node,
-                                  const hash_t *oldacl_comp, const int *oldacl_orders, size_t oldacl_n,
-                                  hash_t newacl_root)
+                                const struct tm_cert *fr_cert, hash_t fr_hmac,
+                                struct iomt_node file_node,
+                                const hash_t *file_comp, const int *file_orders, size_t file_n,
+                                struct iomt_node oldacl_node,
+                                const hash_t *oldacl_comp, const int *oldacl_orders, size_t oldacl_n,
+                                hash_t newacl_root)
 {
     struct tm_request req = req_null;
     req.type = ACL_UPDATE;
 
-    req.idx = file_node->idx;
-    req.counter = hash_to_u64(file_node->val);
+    req.idx = file_node.idx;
+    req.counter = hash_to_u64(file_node.val);
 
-    req.user_id = oldacl_node->idx;
+    req.user_id = oldacl_node.idx;
 
     req.modify.fr_cert = *fr_cert;
     req.modify.fr_hmac = fr_hmac;

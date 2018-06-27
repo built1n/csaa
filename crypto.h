@@ -48,9 +48,6 @@ int *bintree_complement_ordersonly(int leafidx, int logleaves);
  * given leaf node. Will be ordered from nearest relative to root. */
 int *bintree_ancestors(int leafidx, int logleaves);
 
-hash_t *lookup_nodes(const hash_t *nodes, const int *indices, int n);
-void restore_nodes(hash_t *nodes, const int *indices, const hash_t *values, int n);
-
 int bintree_parent(int idx);
 int bintree_sibling(int idx);
 

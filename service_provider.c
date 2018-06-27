@@ -70,25 +70,25 @@ struct service_provider {
  * node. It is the 0-based index of the POSITION of the leaf node,
  * counting from the leftmost leaf. */
 struct tm_cert cert_eq(struct service_provider *sp,
-                       const struct iomt_node *encloser,
+                       struct iomt_node encloser,
                        uint64_t encloser_leafidx,
                        uint64_t placeholder_leafidx, uint64_t placeholder_nodeidx,
                        hash_t *hmac_out)
 {
-    assert(encloses(encloser->idx, encloser->next_idx, placeholder_nodeidx));
+    assert(encloses(encloser.idx, encloser.next_idx, placeholder_nodeidx));
 
-    struct iomt_node encloser_mod = *encloser;
+    struct iomt_node encloser_mod = encloser;
     encloser_mod.next_idx = placeholder_nodeidx;
 
     struct iomt_node insert;
     insert.idx = placeholder_nodeidx;
-    insert.next_idx = encloser->next_idx;
+    insert.next_idx = encloser.next_idx;
     insert.val = hash_null;
 
     hash_t h_enc    = hash_node(encloser);
-    hash_t h_encmod = hash_node(&encloser_mod);
+    hash_t h_encmod = hash_node(encloser_mod);
 
-    hash_t h_ins = hash_node(&insert);
+    hash_t h_ins = hash_node(insert);
 
     int *enc_orders;
     hash_t *enc_comp = merkle_complement(sp->iomt, encloser_leafidx, &enc_orders);
@@ -115,7 +115,7 @@ struct tm_cert cert_eq(struct service_provider *sp,
 
     /* restore the tree */
     int *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
-    restore_nodes(sp->iomt->mt_nodes, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
+    restore_nodes(sp->iomt, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
 
     free(dep_indices);
     free(old_depvalues);
@@ -159,7 +159,11 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
 
     sp->tm = tm_new(key, keylen);
 
-    sp->iomt = iomt_new(logleaves);
+    sp->iomt = iomt_new_from_db(sp->db,
+                                "FileNodes", "FileLeaves",
+                                NULL, 0,
+                                NULL, 0,
+                                logleaves);
 
     /* The trusted module initializes itself with a single placeholder
      * node (1,0,1). We first update our list of IOMT leaves. Then we
@@ -179,7 +183,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
                                     i - 1,
                                     i, i + 1,
                                     &hmac);
-        assert(eq.type == EQ);
+        //assert(eq.type == EQ);
 
         /* update previous leaf's index */
         iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
@@ -189,7 +193,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
          * next node, if any */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
 
-        assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+        //assert(tm_set_equiv_root(sp->tm, &eq, hmac));
     }
 
     return sp;
@@ -237,7 +241,11 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
         memcpy(&rec->fr_hmac, sqlite3_column_blob(st, 4), sizeof(rec->fr_hmac));
 
         int acl_logleaves = sqlite3_column_int(st, 5);
-        rec->acl = iomt_new_from_db(sp->db, "ACLNodes", "ACLLeaves", acl_logleaves);
+        rec->acl = iomt_new_from_db(sp->db,
+                                    "ACLNodes", "ACLLeaves",
+                                    "FileIdx", idx,
+                                    NULL, 0,
+                                    acl_logleaves);
     }
     return NULL;
 }
@@ -284,7 +292,7 @@ static void update_record(struct service_provider *sp,
     sqlite3_bind_blob(st, 4, &rec->fr_cert, sizeof(rec->fr_cert), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 5, &rec->fr_hmac, sizeof(rec->fr_hmac), SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
-    sqlite3_bind_int(st, 6, rec->idx);
+    sqlite3_bind_int(st, 7, rec->idx);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
 
@@ -360,8 +368,16 @@ static struct file_version *lookup_version(struct service_provider *sp,
 
         int bc_logleaves = sqlite3_column_int(st, 6);
         int cf_logleaves = sqlite3_column_int(st, 7);
-        ver->buildcode = iomt_new_from_db(sp->db, "BCNodes", "BCLeaves", bc_logleaves);
-        ver->composefile = iomt_new_from_db(sp->db, "CFNodes", "CFLeaves", cf_logleaves);
+        ver->buildcode = iomt_new_from_db(sp->db,
+                                          "BCNodes", "BCLeaves",
+                                          "FileIdx", file_idx,
+                                          "Version", version,
+                                          bc_logleaves);
+        ver->composefile = iomt_new_from_db(sp->db,
+                                            "CFNodes", "CFLeaves",
+                                            "FileIdx", file_idx,
+                                            "Version", version,
+                                            cf_logleaves);
     }
     return NULL;
 }
@@ -521,7 +537,12 @@ struct tm_request sp_createfile(struct service_provider *sp,
     int *file_orders;
     hash_t *file_comp = merkle_complement(sp->iomt, i, &file_orders);
 
-    struct iomt *acl = iomt_new(ACL_LOGLEAVES);
+    struct iomt *acl = iomt_new_from_db(sp->db,
+                                        "ACLNodes", "ACLLeaves",
+                                        "FileIdx", i,
+                                        NULL, 0,
+                                        ACL_LOGLEAVES);
+
     iomt_update_leaf_full(acl,
                            0,
                            user_id, user_id, u64_to_hash(3));
@@ -570,14 +591,14 @@ struct tm_request sp_modifyacl(struct service_provider *sp,
 
     int *file_orders, *acl_orders;
     uint64_t file_leafidx;
-    struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
+    struct iomt_node file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
 
     hash_t *file_comp = merkle_complement(sp->iomt,
                                           file_leafidx,
                                           &file_orders);
 
     uint64_t acl_leafidx;
-    struct iomt_node *acl_node = iomt_find_leaf(rec->acl, user_id, &acl_leafidx);
+    struct iomt_node acl_node = iomt_find_leaf(rec->acl, user_id, &acl_leafidx);
     hash_t *acl_comp = merkle_complement(rec->acl,
                                          acl_leafidx,
                                          &acl_orders);
@@ -632,14 +653,14 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 
     int *file_orders, *acl_orders;
     uint64_t file_leafidx;
-    struct iomt_node *file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
+    struct iomt_node file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
 
     hash_t *file_comp = merkle_complement(sp->iomt,
                                           file_leafidx,
                                           &file_orders);
 
     uint64_t acl_leafidx;
-    struct iomt_node *acl_node = iomt_find_leaf(rec->acl, user_id, &acl_leafidx);
+    struct iomt_node acl_node = iomt_find_leaf(rec->acl, user_id, &acl_leafidx);
     hash_t *acl_comp = merkle_complement(rec->acl,
                                          acl_leafidx,
                                          &acl_orders);
@@ -648,12 +669,12 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     hash_t lambda = calc_lambda(gamma, buildcode, composefile, kf);
 
     struct tm_request req = req_filemodify(sp->tm,
-                                             &rec->fr_cert, rec->fr_hmac,
-                                             file_node,
-                                             file_comp, file_orders, sp->iomt->mt_logleaves,
-                                             acl_node,
-                                             acl_comp, acl_orders, rec->acl->mt_logleaves,
-                                             lambda);
+                                           &rec->fr_cert, rec->fr_hmac,
+                                           file_node,
+                                           file_comp, file_orders, sp->iomt->mt_logleaves,
+                                           acl_node,
+                                           acl_comp, acl_orders, rec->acl->mt_logleaves,
+                                           lambda);
     free(file_comp);
     free(acl_comp);
     free(file_orders);
@@ -1037,7 +1058,7 @@ static hash_t test_sign_request(void *userdata, const struct tm_request *req)
 
 void sp_test(void)
 {
-    int logleaves = 5;
+    int logleaves = 1;
     printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
     clock_t start = clock();
@@ -1060,10 +1081,10 @@ void sp_test(void)
         struct iomt_node node1 = { 1, 2, sha256("line1\n", 6) };
         struct iomt_node node2 = { 2, 1, sha256("line2", 5) };
 
-        hash_t correct_root = merkle_parent(hash_node(&node1), hash_node(&node2), 0);
+        hash_t correct_root = merkle_parent(hash_node(node1), hash_node(node2), 0);
         check("IOMT generation from file 2", hash_equals(iomt_getroot(buildcode), correct_root));
 
-#define N_MODIFY 100
+#define N_MODIFY 1
         start = clock();
         for(int i = 0; i < N_MODIFY; ++i)
             req = sp_modifyfile(sp, 1, test_sign_request, "a", 1, hash_null, hash_null, buildcode, NULL, "contents", 8, &ack_hmac);
@@ -1097,7 +1118,7 @@ void sp_test(void)
 
         struct iomt_node acl_node = { 1, 1, u64_to_hash(3) };
 
-        struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, hash_node(&acl_node), lambda };
+        struct version_info correct = { 1, N_MODIFY + 1, 1, N_MODIFY, hash_node(acl_node), lambda };
         check("File info retrieval 2", !memcmp(&correct, &vi, sizeof(vi)));
     }
 
@@ -1156,7 +1177,7 @@ void sp_test(void)
     {
         struct iomt_node a = { 1, 2, u64_to_hash(2) };
         struct iomt_node b = { 2, 1, hash_null };
-        check("Merkle tree initialization", hash_equals(iomt_getroot(sp->iomt), merkle_parent(hash_node(&a), hash_node(&b), 0)));
+        check("Merkle tree initialization", hash_equals(iomt_getroot(sp->iomt), merkle_parent(hash_node(a), hash_node(b), 0)));
     }
 
     sp_free(sp);

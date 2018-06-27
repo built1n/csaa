@@ -62,7 +62,7 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
     /* initialize with a node of (1, 0, 1) in the tree */
     struct iomt_node boot = (struct iomt_node) { 1, 1, hash_null };
 
-    tm_setroot(tm, merkle_compute(hash_node(&boot), NULL, NULL, 0));
+    tm_setroot(tm, merkle_compute(hash_node(boot), NULL, NULL, 0));
 
     return tm;
 }
@@ -170,7 +170,7 @@ struct tm_cert tm_cert_combine(const struct trusted_module *tm,
 struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
                              const struct tm_cert *nu_encl, hash_t hmac_encl,
                              const struct tm_cert *nu_ins,  hash_t hmac_ins,
-                             const struct iomt_node *encloser,
+                             struct iomt_node encloser,
                              uint64_t a, hash_t *hmac_out)
 {
     if(!nu_encl || !nu_ins)
@@ -188,7 +188,7 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
         tm_seterror("invalid authentication");
         return cert_null;
     }
-    if(!encloses(encloser->idx, encloser->next_idx, a))
+    if(!encloses(encloser.idx, encloser.next_idx, a))
     {
         tm_seterror("encloser does not actually enclose placeholder index");
         return cert_null;
@@ -200,16 +200,16 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
     }
 
     hash_t ve = hash_node(encloser);
-    struct iomt_node encloser_mod = *encloser;
+    struct iomt_node encloser_mod = encloser;
     encloser_mod.next_idx = a;
-    hash_t veprime = hash_node(&encloser_mod);
+    hash_t veprime = hash_node(encloser_mod);
 
     struct iomt_node ins;
     ins.idx = a;
-    ins.next_idx = encloser->next_idx;
+    ins.next_idx = encloser.next_idx;
     memset(ins.val.hash, 0, sizeof(ins.val.hash));
 
-    hash_t viprime = hash_node(&ins);
+    hash_t viprime = hash_node(ins);
 
     if(!hash_equals(nu_encl->nu.orig_node, ve))
     {
@@ -249,7 +249,7 @@ struct tm_cert tm_cert_equiv(const struct trusted_module *tm,
  * y */
 struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t hmac,
-                                     const struct iomt_node *node,
+                                     struct iomt_node node,
                                      hash_t *hmac_out,
                                      uint64_t b,
                                      struct tm_cert *nonexist,
@@ -279,7 +279,7 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
     /* issue a certificate verifying that no node with index b exists as a child of y */
     if(b > 0 && nonexist && hmac_nonexist)
     {
-        if(encloses(node->idx, node->next_idx, b))
+        if(encloses(node.idx, node.next_idx, b))
         {
             *nonexist = cert_null;
             nonexist->type = RV;
@@ -301,8 +301,8 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
 
     cert.type = RV;
     cert.rv.root = nu->nu.orig_root;
-    cert.rv.idx = node->idx;
-    cert.rv.val = node->val;
+    cert.rv.idx = node.idx;
+    cert.rv.val = node.val;
 
     /* can be NULL */
     if(hmac_out)
@@ -312,7 +312,7 @@ struct tm_cert tm_cert_record_verify(const struct trusted_module *tm,
 
 struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
                                      const struct tm_cert *nu, hash_t nu_hmac,
-                                     const struct iomt_node *node,
+                                     struct iomt_node node,
                                      hash_t new_val,
                                      hash_t *hmac_out)
 {
@@ -334,10 +334,10 @@ struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
 
     hash_t orig_h = hash_node(node);
 
-    struct iomt_node new_node = *node;
+    struct iomt_node new_node = node;
     new_node.val = new_val;
 
-    hash_t new_h = hash_node(&new_node);
+    hash_t new_h = hash_node(new_node);
 
     if(!hash_equals(nu->nu.orig_node, orig_h) || !hash_equals(nu->nu.new_node, new_h))
     {
@@ -348,8 +348,8 @@ struct tm_cert tm_cert_record_update(const struct trusted_module *tm,
     struct tm_cert cert = cert_null;
 
     cert.type = RU;
-    cert.ru.idx = node->idx;
-    cert.ru.orig_val = node->val;
+    cert.ru.idx = node.idx;
+    cert.ru.orig_val = node.val;
     cert.ru.new_val = new_val;
     cert.ru.orig_root = nu->nu.orig_root;
     cert.ru.new_root = nu->nu.new_root;
