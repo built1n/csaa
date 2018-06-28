@@ -9,7 +9,7 @@ struct iomt_node {
 };
 
 /* indices cannot be zero */
-static const struct iomt_node node_null = { 0, 0, hash_null };
+static const struct iomt_node node_null = { 0, 0, { { 0 } } };
 
 /* Each level of the IOMT is stored sequentially from left to
  * right, top to bottom, as follows:
