@@ -227,6 +227,27 @@ hash_t hash_increment(hash_t h)
 #include <string.h>
 #include <openssl/engine.h>
 
+
+ const unsigned char *EVP_CIPHER_CTX_iv(const EVP_CIPHER_CTX *ctx)
+ {
+    return ctx->iv;
+ }
+
+ unsigned char *EVP_CIPHER_CTX_iv_noconst(EVP_CIPHER_CTX *ctx)
+ {
+    return ctx->iv;
+ }
+
+ EVP_MD_CTX *EVP_MD_CTX_new(void)
+ {
+    return OPENSSL_zalloc(sizeof(EVP_MD_CTX));
+ }
+
+ void EVP_MD_CTX_free(EVP_MD_CTX *ctx)
+ {
+    EVP_MD_CTX_cleanup(ctx);
+    OPENSSL_free(ctx);
+ }
  HMAC_CTX *HMAC_CTX_new(void)
  {
     HMAC_CTX *ctx = OPENSSL_malloc(sizeof(*ctx));
@@ -242,13 +263,14 @@ hash_t hash_increment(hash_t h)
  void HMAC_CTX_free(HMAC_CTX *ctx)
  {
     if (ctx != NULL) {
-        hmac_ctx_cleanup(ctx);
         EVP_MD_CTX_free(ctx->i_ctx);
         EVP_MD_CTX_free(ctx->o_ctx);
         EVP_MD_CTX_free(ctx->md_ctx);
         OPENSSL_free(ctx);
     }
- }
+ 
+}
+
 #endif
 
 /* simple XOR cipher, so encryption and decryption are symmetric */
