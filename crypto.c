@@ -227,6 +227,14 @@ hash_t hash_increment(hash_t h)
 #include <string.h>
 #include <openssl/engine.h>
 
+ static void *OPENSSL_zalloc(size_t num)
+ {
+    void *ret = OPENSSL_malloc(num);
+
+    if (ret != NULL)
+        memset(ret, 0, num);
+    return ret;
+ }
 
  const unsigned char *EVP_CIPHER_CTX_iv(const EVP_CIPHER_CTX *ctx)
  {
@@ -251,12 +259,7 @@ hash_t hash_increment(hash_t h)
  HMAC_CTX *HMAC_CTX_new(void)
  {
     HMAC_CTX *ctx = OPENSSL_malloc(sizeof(*ctx));
-    if (ctx != NULL) {
-        if (!HMAC_CTX_reset(ctx)) {
-            HMAC_CTX_free(ctx);
-            return NULL;
-        }
-    }
+
     return ctx;
  }
 
