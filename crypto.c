@@ -258,7 +258,7 @@ hash_t hash_increment(hash_t h)
  }
  HMAC_CTX *HMAC_CTX_new(void)
  {
-    HMAC_CTX *ctx = OPENSSL_malloc(sizeof(*ctx));
+    HMAC_CTX *ctx = OPENSSL_zalloc(sizeof(*ctx));
 
     return ctx;
  }
@@ -266,12 +266,9 @@ hash_t hash_increment(hash_t h)
  void HMAC_CTX_free(HMAC_CTX *ctx)
  {
     if (ctx != NULL) {
-        EVP_MD_CTX_free(&ctx->i_ctx);
-        EVP_MD_CTX_free(&ctx->o_ctx);
-        EVP_MD_CTX_free(&ctx->md_ctx);
         OPENSSL_free(ctx);
     }
- 
+
 }
 
 #endif
@@ -283,10 +280,16 @@ hash_t crypt_secret(hash_t encrypted_secret,
 {
     hash_t pad; /* key = encrypted_secret ^ pad */
     HMAC_CTX *ctx = HMAC_CTX_new();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    HMAC_Init(ctx,
+              key, keylen,
+              EVP_sha256());
+#else
     HMAC_Init_ex(ctx,
                  key, keylen,
                  EVP_sha256(), NULL);
-
+#endif
+    
     /* potential endianness issue */
     HMAC_Update(ctx, (const unsigned char*)&file_idx, sizeof(file_idx));
     HMAC_Update(ctx, (const unsigned char*)&file_version, sizeof(file_version));
@@ -393,9 +396,15 @@ void crypt_bytes(unsigned char *data, size_t len, hash_t key)
 hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_t keylen)
 {
     HMAC_CTX *ctx = HMAC_CTX_new();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    HMAC_Init(ctx,
+              key, keylen,
+              EVP_sha256());
+#else
     HMAC_Init_ex(ctx,
                  key, keylen,
                  EVP_sha256(), NULL);
+#endif
 
     HMAC_Update(ctx, (const unsigned char*)req, sizeof(*req));
 
