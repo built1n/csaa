@@ -561,23 +561,32 @@ struct iomt *iomt_dup_in_db(void *db,
 
 /* produces a new IOMT with no relation with the old one (no pointer
  * semantics) */
-struct iomt *iomt_dup(const struct iomt *tree)
+struct iomt *iomt_dup(const struct iomt *oldtree)
 {
-    if(!tree)
+    if(!oldtree)
         return NULL;
 
-    if(!tree->in_memory)
-        assert(false);
-
     struct iomt *newtree = calloc(1, sizeof(struct iomt));
-    newtree->mt_leafcount = tree->mt_leafcount;
-    newtree->mt_logleaves = tree->mt_logleaves;
+    newtree->mt_leafcount = oldtree->mt_leafcount;
+    newtree->mt_logleaves = oldtree->mt_logleaves;
 
-    newtree->mem.mt_leaves = calloc(tree->mt_leafcount, sizeof(struct iomt_node));
-    memcpy(newtree->mem.mt_leaves, tree->mem.mt_leaves, tree->mt_leafcount * sizeof(struct iomt_node));
+    newtree->mem.mt_leaves = calloc(oldtree->mt_leafcount, sizeof(struct iomt_node));
+    newtree->mem.mt_nodes = calloc(2 * oldtree->mt_leafcount - 1, sizeof(hash_t));
 
-    newtree->mem.mt_nodes = calloc(2 * tree->mt_leafcount - 1, sizeof(hash_t));
-    memcpy(newtree->mem.mt_nodes, tree->mem.mt_nodes, (2 * tree->mt_leafcount - 1) * sizeof(hash_t));
+    if(oldtree->in_memory)
+    {
+        memcpy(newtree->mem.mt_leaves, oldtree->mem.mt_leaves, oldtree->mt_leafcount * sizeof(struct iomt_node));
+        memcpy(newtree->mem.mt_nodes, oldtree->mem.mt_nodes, (2 * oldtree->mt_leafcount - 1) * sizeof(hash_t));
+    }
+    else
+    {
+        /* copy nodes, leaves (we do not recalculate the tree) */
+        for(int i = 0; i < newtree->mt_leafcount; ++i)
+            iomt_setleaf(newtree, i, iomt_getleaf(oldtree, i));
+
+        for(int i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
+            iomt_setnode(newtree, i, iomt_getnode(oldtree, i));
+    }
 
     return newtree;
 }

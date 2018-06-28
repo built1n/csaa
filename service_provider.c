@@ -218,18 +218,13 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 
     sp->tm = tm_new(key, keylen);
 
-    sp->iomt = iomt_new_from_db(sp->db,
-                                "FileNodes", "FileLeaves",
-                                NULL, 0,
-                                NULL, 0,
-                                logleaves);
-
-    begin_transaction(sp->db);
+    /* create IOMT in memory first, then commit to DB */
+    sp->iomt = iomt_new(logleaves);
 
     sp->data_dir = data_dir;
 
     clock_t start = clock();
-    
+
     /* The trusted module initializes itself with a single placeholder
      * node (1,0,1). We first update our list of IOMT leaves. Then we
      * insert our desired number of nodes by using EQ certificates to
@@ -267,17 +262,37 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 #endif
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-        //printf("%d\n", i);
+        printf("%d\n", i);
     }
+
+    /* now transfer to database */
+    printf("IOMT initialized in memory, transferring to DB...\n");
+
+    clock_t point1 = clock();
+
+    begin_transaction(sp->db);
+
+    /* we must do it this way because cert_eq expects sp->iomt to be
+     * the working tree */
+    struct iomt *old = sp->iomt;
+
+    sp->iomt = iomt_dup_in_db(sp->db,
+                              "FileNodes", "FileLeaves",
+                              NULL, 0,
+                              NULL, 0,
+                              old);
 
     commit_transaction(sp->db);
 
+    iomt_free(old);
+
     clock_t stop = clock();
 
-    printf("sp_init(): logleaves=%d, time=%.1fsec, rate=%.1f/sec\n",
+    printf("sp_init(): logleaves=%d, time=%.1fsec, overall_rate=%.1f/sec, db_time=%.1fsec\n",
            logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
-           (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ));
-    
+           (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ),
+           (double)(stop - point1) / CLOCKS_PER_SEC);
+
     return sp;
 }
 
@@ -1178,7 +1193,7 @@ void sp_test(void)
     clock_t start = clock();
     struct service_provider *sp = sp_new("a", 1, logleaves, "files");
     clock_t stop = clock();
-    
+
     check("Tree initialization", sp != NULL);
 
     {
