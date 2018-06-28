@@ -1,6 +1,7 @@
 #ifndef CSAA_IOMT_H
 #define CSAA_IOMT_H
 #include "crypto.h"
+#include <sqlite3.h>
 
 struct iomt_node {
     uint64_t idx, next_idx; /* idx cannot be zero */
@@ -37,6 +38,9 @@ struct iomt {
              * not NULL) key2_name = key2_val */
             const char *key1_name, *key2_name;
             int key1_val, key2_val;
+
+            sqlite3_stmt *getnode, *updatenode, *insertnode;
+            sqlite3_stmt *getleaf, *updateleaf, *insertleaf;
         } db;
         struct {
             hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note
@@ -66,7 +70,14 @@ struct iomt *iomt_new_from_db(void *db,
                               const char *key1_name, int key1_val,
                               const char *key2_name, int key2_val,
                               int logleaves);
+
 struct iomt *iomt_dup(const struct iomt *tree);
+struct iomt *iomt_dup_in_db(void *db,
+                            const char *nodes_table, const char *leaves_table,
+                            const char *key1_name, int key1_val,
+                            const char *key2_name, int key2_val,
+                            const struct iomt *oldtree);
+
 void iomt_free(struct iomt *tree);
 
 /* Find a leaf with IOMT index `idx' and change its value, propagating

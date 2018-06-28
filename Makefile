@@ -1,5 +1,5 @@
 all: client server Makefile
-CFLAGS = -g -Wall -O0 -lsqlite3
+CFLAGS = -g -Wall -O3 -lsqlite3
 
 client: client.o crypto.o test.o iomt.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)

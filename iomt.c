@@ -21,30 +21,8 @@ hash_t iomt_getnode(const struct iomt *tree, int idx)
         return tree->mem.mt_nodes[idx];
     else
     {
-        sqlite3 *handle = tree->db.db;
-
-        char sql[1000];
-        if(tree->db.key1_name)
-        {
-            if(tree->db.key2_name)
-            {
-                snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE %s = ?3 AND %s = ?5 AND NodeIdx = ?6;",
-                         tree->db.nodes_table,
-                         tree->db.key1_name,
-                         tree->db.key2_name);
-            }
-            else
-                snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE %s = ?3 AND NodeIdx = ?6;",
-                         tree->db.nodes_table,
-                         tree->db.key1_name);
-        }
-        else
-            snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE NodeIdx = ?6;",
-                     tree->db.nodes_table);
-
-        sqlite3_stmt *st;
-
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+        sqlite3_stmt *st = tree->db.getnode;
+        sqlite3_reset(st);
 
         if(tree->db.key1_name)
         {
@@ -80,32 +58,13 @@ void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
         tree->mem.mt_nodes[idx] = val;
     else
     {
-        printf("Setting node idx = %d in %s\n", idx, tree->db.nodes_table);
+        //printf("Setting node idx = %d in %s\n", idx, tree->db.nodes_table);
 
         sqlite3 *handle = tree->db.db;
 
-        char sql[1000];
-        if(tree->db.key1_name)
-        {
-            if(tree->db.key2_name)
-            {
-                snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE %s = ?4 AND %s = ?6 AND NodeIdx = ?7;",
-                         tree->db.nodes_table,
-                         tree->db.key1_name,
-                         tree->db.key2_name);
-            }
-            else
-                snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE %s = ?4 AND NodeIdx = ?7;",
-                         tree->db.nodes_table,
-                         tree->db.key1_name);
-        }
-        else
-            snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE NodeIdx = ?7;",
-                     tree->db.nodes_table);
+        sqlite3_stmt *st = tree->db.updatenode;
+        sqlite3_reset(st);
 
-        sqlite3_stmt *st;
-
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
         sqlite3_bind_blob(st, 2, &val, sizeof(val), SQLITE_TRANSIENT);
 
         if(tree->db.key1_name)
@@ -124,29 +83,11 @@ void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
 
         int changes = sqlite3_changes(handle);
 
-        sqlite3_finalize(st);
-
         /* Failure, likely because node doesn't exist */
         if(rc != SQLITE_DONE || !changes)
         {
-            printf("Update failed, (%s) inserting...\n", sqlite3_errmsg(handle));
-            if(tree->db.key1_name)
-            {
-                if(tree->db.key2_name)
-                    snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val, %s, %s ) VALUES ( ?4, ?5, ?6, ?7 );",
-                             tree->db.nodes_table,
-                             tree->db.key1_name,
-                             tree->db.key2_name);
-                else
-                    snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val, %s ) VALUES ( ?4, ?5, ?6 );",
-                             tree->db.nodes_table,
-                             tree->db.key1_name);
-            }
-            else
-                snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val ) VALUES ( ?4, ?5 );",
-                         tree->db.nodes_table);
-
-            sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+            st = tree->db.insertnode;
+            sqlite3_reset(st);
 
             sqlite3_bind_int(st, 4, idx);
             sqlite3_bind_blob(st, 5, &val, sizeof(val), SQLITE_TRANSIENT);
@@ -160,10 +101,12 @@ void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
 
             if(sqlite3_step(st) != SQLITE_DONE)
             {
-                printf("Failed 1: %s\n", sqlite3_errmsg(tree->db.db));
+                //printf("Failed 1: %s\n", sqlite3_errmsg(tree->db.db));
             }
-
-            sqlite3_finalize(st);
+        }
+        else
+        {
+            //printf("Successfully updated node %d\n", idx);
         }
     }
 }
@@ -174,32 +117,8 @@ struct iomt_node iomt_getleaf(const struct iomt *tree, uint64_t leafidx)
         return tree->mem.mt_leaves[leafidx];
     else
     {
-        sqlite3 *handle = tree->db.db;
-
-        char sql[1000];
-        if(tree->db.key1_name)
-        {
-            if(tree->db.key2_name)
-            {
-                snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE %s = ?3 AND %s = ?5 AND LeafIdx = ?6;",
-                       tree->db.leaves_table,
-                       tree->db.key1_name,
-                       tree->db.key2_name);
-            }
-            else
-            {
-                snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE %s = ?3 AND LeafIdx = ?6;",
-                       tree->db.leaves_table,
-                       tree->db.key1_name);
-            }
-        }
-        else
-            snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE LeafIdx = ?6;",
-                   tree->db.leaves_table);
-
-        sqlite3_stmt *st;
-
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+        sqlite3_stmt *st = tree->db.getleaf;
+        sqlite3_reset(st);
 
         if(tree->db.key1_name)
         {
@@ -226,8 +145,8 @@ struct iomt_node iomt_getleaf(const struct iomt *tree, uint64_t leafidx)
         }
         else
         {
-            printf("Failed 2: %s\n", sqlite3_errmsg(tree->db.db));
-            printf("Failed to look up leaf %d in %s\n", leafidx, tree->db.leaves_table);
+            //printf("Failed 2: %s\n", sqlite3_errmsg(tree->db.db));
+            //printf("Failed to look up leaf %lu in %s\n", leafidx, tree->db.leaves_table);
             return node_null;
         }
     }
@@ -239,36 +158,13 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
         tree->mem.mt_leaves[leafidx] = val;
     else
     {
-        printf("Setting leaf idx = %d in %s\n", leafidx, tree->db.leaves_table);
+        //printf("Setting leaf idx = %lu in %s\n", leafidx, tree->db.leaves_table);
 
         sqlite3 *handle = tree->db.db;
 
-        char sql[1000];
-        if(tree->db.key1_name)
-        {
-            if(tree->db.key2_name)
-            {
-                snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE %s = ?6 AND %s = ?8 AND LeafIdx = ?9;",
-                         tree->db.leaves_table,
-                         tree->db.key1_name,
-                         tree->db.key2_name);
-            }
-            else
-            {
-                snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE %s = ?6 AND LeafIdx = ?9;",
-                       tree->db.leaves_table,
-                       tree->db.key1_name);
-            }
-        }
-        else
-            snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE LeafIdx = ?9;",
-                     tree->db.leaves_table);
+        sqlite3_stmt *st = tree->db.updateleaf;
+        sqlite3_reset(st);
 
-        printf("Statement is %s\n", sql);
-
-        sqlite3_stmt *st;
-
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
         sqlite3_bind_int(st, 2, val.idx);
         sqlite3_bind_int(st, 3, val.next_idx);
         sqlite3_bind_blob(st, 4, &val.val, sizeof(val.val), SQLITE_TRANSIENT);
@@ -289,31 +185,11 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
 
         int changes = sqlite3_changes(handle);
 
-        sqlite3_finalize(st);
-
         /* Failure, likely because node doesn't exist */
         if(rc != SQLITE_DONE || !changes)
         {
-            printf("Update failed (%s), inserting...\n", sqlite3_errmsg(handle));
-
-            if(tree->db.key1_name)
-            {
-                if(tree->db.key2_name)
-                    snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val, %s, %s ) VALUES ( ?5, ?6, ?7, ?8, ?9, ?10 );",
-                             tree->db.leaves_table,
-                             tree->db.key1_name,
-                             tree->db.key2_name);
-                else
-                    snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val, %s ) VALUES ( ?5, ?6, ?7, ?8, ?9 );",
-                             tree->db.leaves_table,
-                             tree->db.key1_name);
-            }
-            else
-                snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val ) VALUES ( ?5, ?6, ?7, ?8 );",
-                         tree->db.leaves_table);
-
-
-            sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+            st = tree->db.insertleaf;
+            sqlite3_reset(st);
 
             if(tree->db.key1_name)
             {
@@ -335,9 +211,7 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
                 printf("Failed 3: %s\n", sqlite3_errmsg(handle));
             }
 
-            printf("Successfully inserted (%s)\n", sqlite3_errmsg(handle));
-
-            sqlite3_finalize(st);
+            //printf("Successfully inserted (%s)\n", sqlite3_errmsg(handle));
         }
     }
 }
@@ -436,6 +310,7 @@ hash_t iomt_getroot(const struct iomt *tree)
 }
 
 /* find a node with given idx */
+/* TODO: replace with database update */
 struct iomt_node iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t *leafidx)
 {
     for(int i = 0; i < tree->mt_leafcount; ++i)
@@ -443,7 +318,7 @@ struct iomt_node iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t 
         {
             if(leafidx)
                 *leafidx = i;
-            return tree->mem.mt_leaves[i];
+            return iomt_getleaf(tree, i);
         }
     return node_null;
 }
@@ -455,7 +330,7 @@ struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint6
         {
             if(leafidx)
                 *leafidx = i;
-            return tree->mem.mt_leaves[i];
+            return iomt_getleaf(tree, i);
         }
     return node_null;
 }
@@ -469,7 +344,7 @@ struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t id
         {
             if(leafidx)
                 *leafidx = i;
-            return tree->mem.mt_leaves[i];
+            return iomt_getleaf(tree, i);
         }
     }
     return node_null;
@@ -478,7 +353,7 @@ struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t id
 void iomt_update(struct iomt *tree, uint64_t idx, hash_t newval)
 {
     /* update the leaf first, then use merkle_update */
-    uint64_t leafidx;
+    uint64_t leafidx = 0;
     struct iomt_node leaf = iomt_find_leaf(tree, idx, &leafidx);
     leaf.val = newval;
     iomt_setleaf(tree, leafidx, leaf);
@@ -566,13 +441,134 @@ struct iomt *iomt_new_from_db(void *db,
     tree->db.key2_name = key2_name;
     tree->db.key2_val = key2_val;
 
+    /* compile statements now to save time */
+    char sql[1000];
+
+    /* TODO: refactor! */
+
+    if(tree->db.key1_name)
+    {
+        if(tree->db.key2_name)
+        {
+            snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE %s = ?3 AND %s = ?5 AND NodeIdx = ?6;",
+                     tree->db.nodes_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.getnode, 0);
+
+            snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE %s = ?4 AND %s = ?6 AND NodeIdx = ?7;",
+                     tree->db.nodes_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.updatenode, 0);
+            snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val, %s, %s ) VALUES ( ?4, ?5, ?6, ?7 );",
+                     tree->db.nodes_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.insertnode, 0);
+            snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE %s = ?3 AND %s = ?5 AND LeafIdx = ?6;",
+                     tree->db.leaves_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.getleaf, 0);
+            snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE %s = ?6 AND %s = ?8 AND LeafIdx = ?9;",
+                     tree->db.leaves_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.updateleaf, 0);
+            snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val, %s, %s ) VALUES ( ?5, ?6, ?7, ?8, ?9, ?10 );",
+                     tree->db.leaves_table,
+                     tree->db.key1_name,
+                     tree->db.key2_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.insertleaf, 0);
+        }
+        else
+        {
+            snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE %s = ?3 AND NodeIdx = ?6;",
+                     tree->db.nodes_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.getnode, 0);
+            snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE %s = ?4 AND NodeIdx = ?7;",
+                     tree->db.nodes_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.updatenode, 0);
+            snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val, %s ) VALUES ( ?4, ?5, ?6 );",
+                     tree->db.nodes_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.insertnode, 0);
+            snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE %s = ?3 AND LeafIdx = ?6;",
+                     tree->db.leaves_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.getleaf, 0);
+            snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE %s = ?6 AND LeafIdx = ?9;",
+                     tree->db.leaves_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.updateleaf, 0);
+            snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val, %s ) VALUES ( ?5, ?6, ?7, ?8, ?9 );",
+                     tree->db.leaves_table,
+                     tree->db.key1_name);
+            sqlite3_prepare_v2(db, sql, -1, &tree->db.insertleaf, 0);
+        }
+    }
+    else
+    {
+        snprintf(sql, sizeof(sql), "SELECT Val FROM %s WHERE NodeIdx = ?6;",
+                 tree->db.nodes_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.getnode, 0);
+        snprintf(sql, sizeof(sql), "UPDATE %s SET Val = ?2 WHERE NodeIdx = ?7;",
+                 tree->db.nodes_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.updatenode, 0);
+        snprintf(sql, sizeof(sql), "INSERT INTO %s ( NodeIdx, Val ) VALUES ( ?4, ?5 );",
+                 tree->db.nodes_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.insertnode, 0);
+        snprintf(sql, sizeof(sql), "SELECT Idx, NextIdx, Val FROM %s WHERE LeafIdx = ?6;",
+                 tree->db.leaves_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.getleaf, 0);
+        snprintf(sql, sizeof(sql), "UPDATE %s SET Idx = ?2, NextIdx = ?3, Val = ?4 WHERE LeafIdx = ?9;",
+                 tree->db.leaves_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.updateleaf, 0);
+        snprintf(sql, sizeof(sql), "INSERT INTO %s ( LeafIdx, Idx, NextIdx, Val ) VALUES ( ?5, ?6, ?7, ?8 );",
+                 tree->db.leaves_table);
+        sqlite3_prepare_v2(db, sql, -1, &tree->db.insertleaf, 0);
+    }
+
     return tree;
 }
 
+/* make a copy of the IOMT with database backing (there will be no
+ * pointer semantics between the two trees when this function
+ * returns) */
+struct iomt *iomt_dup_in_db(void *db,
+                            const char *nodes_table, const char *leaves_table,
+                            const char *key1_name, int key1_val,
+                            const char *key2_name, int key2_val,
+                            const struct iomt *oldtree)
+{
+    struct iomt *newtree = iomt_new_from_db(db, nodes_table, leaves_table,
+                                            key1_name, key1_val,
+                                            key2_name, key2_val,
+                                            oldtree->mt_logleaves);
+
+    /* copy nodes, leaves (we do not recalculate the tree) */
+    for(int i = 0; i < newtree->mt_leafcount; ++i)
+        iomt_setleaf(newtree, i, iomt_getleaf(oldtree, i));
+
+    for(int i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
+        iomt_setnode(newtree, i, iomt_getnode(oldtree, i));
+
+    return newtree;
+}
+
+/* produces a new IOMT with no relation with the old one (no pointer
+ * semantics) */
 struct iomt *iomt_dup(const struct iomt *tree)
 {
     if(!tree)
         return NULL;
+
+    if(!tree->in_memory)
+        assert(false);
+
     struct iomt *newtree = calloc(1, sizeof(struct iomt));
     newtree->mt_leafcount = tree->mt_leafcount;
     newtree->mt_logleaves = tree->mt_logleaves;
@@ -649,10 +645,13 @@ struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t l
 
 void iomt_free(struct iomt *tree)
 {
-    if(tree && tree->in_memory)
+    if(tree)
     {
-        free(tree->mem.mt_nodes);
-        free(tree->mem.mt_leaves);
+        if(tree->in_memory)
+        {
+            free(tree->mem.mt_nodes);
+            free(tree->mem.mt_leaves);
+        }
         free(tree);
     }
 }
@@ -712,17 +711,18 @@ struct iomt *iomt_from_lines(const char *filename)
 
 void iomt_dump(const struct iomt *tree)
 {
-    if(tree && tree->in_memory)
+    if(tree)
     {
         for(int i = 0; i < tree->mt_leafcount; ++i)
         {
+            struct iomt_node node = iomt_getleaf(tree, i);
             printf("(%lu, %s, %lu)%s",
-                   tree->mem.mt_leaves[i].idx,
-                   hash_format(tree->mem.mt_leaves[i].val, 4).str,
-                   tree->mem.mt_leaves[i].next_idx,
+                   node.idx,
+                   hash_format(node.val, 4).str,
+                   node.next_idx,
                    (i == tree->mt_leafcount - 1) ? "\n" : ", ");
         }
     }
     else
-        printf("(empty IOMT)\n");
+        printf("(null IOMT)\n");
 }

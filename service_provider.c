@@ -8,8 +8,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <sqlite3.h>
 
@@ -21,6 +22,8 @@
 
 /* arbitrary */
 #define ACL_LOGLEAVES 4
+
+#define MAX_PATH 260
 
 /* free with free_version */
 struct file_version {
@@ -53,6 +56,8 @@ struct file_record {
 
 struct service_provider {
     struct trusted_module *tm;
+
+    const char *data_dir;
 
     void *db; /* sqlite3 handle */
     struct iomt *iomt; /* backed by database */
@@ -128,16 +133,54 @@ struct tm_cert cert_eq(struct service_provider *sp,
     return tm_cert_equiv(sp->tm, &nu1, nu1_hmac, &nu2, nu2_hmac, encloser, placeholder_nodeidx, hmac_out);
 }
 
-/* write to file CSAA_FILES/file_idx/version */
-void write_contents(int file_idx, int version,
+/* write to file data_dir/file_idx/version */
+void write_contents(const struct service_provider *sp,
+                    int file_idx, int version,
                     const void *data, size_t len)
 {
+    mkdir(sp->data_dir, 0755);
+
+    char dirname[MAX_PATH];
+    snprintf(dirname, sizeof(dirname), "%s/%d", sp->data_dir, file_idx);
+
+    mkdir(dirname, 0755);
+
+    char filename[MAX_PATH];
+    snprintf(filename, sizeof(filename), "%s/%d/%d", sp->data_dir, file_idx, version);
+
+    FILE *f = fopen(filename, "w");
+
+    fwrite(data, 1, len, f);
+
+    fclose(f);
 }
 
-void *read_contents(int file_idx, int version,
+size_t file_len(FILE *f)
+{
+    off_t orig = ftell(f);
+    fseek(f, 0, SEEK_END);
+    off_t len = ftell(f);
+    fseek(f, orig, SEEK_SET);
+
+    return (size_t)len;
+}
+
+void *read_contents(const struct service_provider *sp,
+                    int file_idx, int version,
                     size_t *len)
 {
+    char filename[MAX_PATH];
+    snprintf(filename, sizeof(filename), "%s/%d/%d", sp->data_dir, file_idx, version);
 
+    FILE *f = fopen(filename, "r");
+
+    *len = file_len(f);
+
+    void *buf = malloc(*len);
+    fread(buf, 1, *len, f);
+
+    fclose(f);
+    return buf;
 }
 
 void *db_init(const char *filename)
@@ -146,11 +189,26 @@ void *db_init(const char *filename)
     if(sqlite3_open(filename, &db) != SQLITE_OK)
         return NULL;
 
+    sqlite3_exec(db, "PRAGMA synchronous = 0;", 0, 0, 0);
+    sqlite3_exec(db, "PRAGMA journal_mode = memory;", 0, 0, 0);
+
     return db;
 }
 
+void begin_transaction(void *db)
+{
+    sqlite3 *handle = db;
+    sqlite3_exec(handle, "BEGIN;", 0, 0, 0);
+}
+
+void commit_transaction(void *db)
+{
+    sqlite3 *handle = db;
+    sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
+}
+
 /* leaf count will be 2^logleaves */
-struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
+struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir)
 {
     assert(logleaves > 0);
     struct service_provider *sp = calloc(1, sizeof(*sp));
@@ -164,6 +222,10 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
                                 NULL, 0,
                                 NULL, 0,
                                 logleaves);
+
+    begin_transaction(sp->db);
+
+    sp->data_dir = data_dir;
 
     /* The trusted module initializes itself with a single placeholder
      * node (1,0,1). We first update our list of IOMT leaves. Then we
@@ -193,28 +255,50 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves)
          * next node, if any */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
 
+#if 0
+        if(i % 10 == 0)
+        {
+            commit_transaction(sp->db);
+            begin_transaction(sp->db);
+        }
+#endif
+
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+        printf("%d\n", i);
     }
+
+    commit_transaction(sp->db);
 
     return sp;
 }
 
 static void free_version(struct file_version *ver)
 {
-    iomt_free(ver->buildcode);
-    iomt_free(ver->composefile);
+    if(ver)
+    {
+        iomt_free(ver->buildcode);
+        iomt_free(ver->composefile);
+        free(ver);
+    }
 }
 
 static void free_record(struct file_record *rec)
 {
-    iomt_free(rec->acl);
+    if(rec)
+    {
+        iomt_free(rec->acl);
+        free(rec);
+    }
 }
 
 void sp_free(struct service_provider *sp)
 {
-    tm_free(sp->tm);
-    iomt_free(sp->iomt);
-    free(sp);
+    if(sp)
+    {
+        tm_free(sp->tm);
+        iomt_free(sp->iomt);
+        free(sp);
+    }
 }
 
 /* linear search for record given idx */
@@ -246,7 +330,10 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
                                     "FileIdx", idx,
                                     NULL, 0,
                                     acl_logleaves);
+
+        return rec;
     }
+    //printf("Failed to find file record with index %lu (%s), ret %d\n", idx, sqlite3_errmsg(handle), rc);
     return NULL;
 }
 
@@ -256,9 +343,11 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
  * there are no duplicate file indices; that is up to the caller. */
 static void insert_record(struct service_provider *sp, const struct file_record *rec)
 {
+    //printf("Inserting record %lu\n", rec->idx);
+
     sqlite3 *handle = sp->db;
 
-    const char *sql = "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 )";
+    const char *sql = "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 );";
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
     sqlite3_bind_int(st, 1, rec->idx);
@@ -282,7 +371,7 @@ static void update_record(struct service_provider *sp,
 {
     sqlite3 *handle = sp->db;
 
-    const char *sql = "UPDATE FileRecords SET Idx = ?1, Version = ?2, Counter = ?3, Cert = ?4, HMAC = ?5, ACL_logleaves = ?6 WHERE Idx = ?7";
+    const char *sql = "UPDATE FileRecords SET Idx = ?1, Ver = ?2, Ctr = ?3, Cert = ?4, HMAC = ?5, ACL_logleaves = ?6 WHERE Idx = ?7;";
 
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
@@ -305,7 +394,7 @@ static void insert_version(struct service_provider *sp,
 {
     sqlite3 *handle = sp->db;
 
-    const char *sql = "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 ?7 ?8 )";
+    const char *sql = "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 );";
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
     sqlite3_bind_int(st, 1, rec->idx);
@@ -314,10 +403,16 @@ static void insert_version(struct service_provider *sp,
     sqlite3_bind_blob(st, 4, &ver->encrypted_secret, sizeof(ver->encrypted_secret), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 5, &ver->vr_cert, sizeof(ver->vr_cert), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 6, &ver->vr_hmac, sizeof(ver->vr_hmac), SQLITE_TRANSIENT);
-    sqlite3_bind_int(st, 7, ver->buildcode->mt_logleaves);
-    sqlite3_bind_int(st, 8, ver->composefile->mt_logleaves);
 
-    assert(sqlite3_step(st) == SQLITE_DONE);
+    sqlite3_bind_int(st, 7, ver->buildcode ? ver->buildcode->mt_logleaves : -1);
+
+    sqlite3_bind_int(st, 8, ver->composefile ? ver->composefile->mt_logleaves : -1);
+
+    int rc = sqlite3_step(st);
+    if(rc != SQLITE_DONE)
+    {
+        printf("Failed (%s)\n", sqlite3_errmsg(handle));
+    }
 
     sqlite3_finalize(st);
 }
@@ -380,6 +475,7 @@ static struct file_version *lookup_version(struct service_provider *sp,
                                             "FileIdx", file_idx,
                                             "Version", version,
                                             cf_logleaves);
+        return ver;
     }
     return NULL;
 }
@@ -399,8 +495,9 @@ static struct file_version *lookup_version(struct service_provider *sp,
  * HMAC(encryption secret, file index).
  *
  * If the request is to either modify the ACL or create a file (which
- * is essentially an ACL update), the ACL will be set to
- * new_acl. `new_acl' must be in persistent storage. */
+ * is essentially an ACL update), the ACL will be set to new_acl. This
+ * function will make a copy of new_acl, so it can safely be freed
+ * after calling this function. */
 struct tm_cert sp_request(struct service_provider *sp,
                           const struct tm_request *req, hash_t req_hmac,
                           hash_t *hmac_out,
@@ -427,8 +524,8 @@ struct tm_cert sp_request(struct service_provider *sp,
         bool need_insert = false;
         if(!rec)
         {
-            need_insert = true;
             rec = calloc(1, sizeof(struct file_record));
+            need_insert = true;
         }
 
         rec->idx = fr.fr.idx;
@@ -441,9 +538,14 @@ struct tm_cert sp_request(struct service_provider *sp,
             /* check that the passed value matches the calculated root */
             assert(hash_equals(req->val, iomt_getroot(new_acl)));
 
-            /* update our ACL */
             iomt_free(rec->acl);
-            rec->acl = iomt_dup(new_acl);
+
+            /* copy the ACL into our database tables */
+            rec->acl = iomt_dup_in_db(sp->db,
+                                      "ACLNodes", "ACLLeaves",
+                                      "FileIdx", fr.fr.idx,
+                                      NULL, 0,
+                                      new_acl);
         }
 
         if(rec->version != fr.fr.version)
@@ -472,6 +574,7 @@ struct tm_cert sp_request(struct service_provider *sp,
                 ver.encrypted_secret = hash_null;
             }
 
+            ver.version = fr.fr.version;
             ver.vr_cert = vr;
             ver.vr_hmac = vr_hmac;
 
@@ -484,7 +587,7 @@ struct tm_cert sp_request(struct service_provider *sp,
             if(encrypted_contents)
             {
                 /* write to disk */
-                write_contents(fr.fr.idx, fr.fr.version,
+                write_contents(sp, fr.fr.idx, fr.fr.version,
                                encrypted_contents, contents_len);
             }
 
@@ -511,6 +614,9 @@ struct tm_cert sp_request(struct service_provider *sp,
         *vr_hmac_out = vr_hmac;
     if(ack_hmac_out)
         *ack_hmac_out = ack_hmac;
+
+    if(is_zero(*ack_hmac_out))
+        printf("Failed: %s\n", tm_geterror());
 
     return fr;
 }
@@ -541,7 +647,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
 
     struct iomt *acl = iomt_new_from_db(sp->db,
                                         "ACLNodes", "ACLLeaves",
-                                        "FileIdx", i,
+                                        "FileIdx", iomt_getleaf(sp->iomt, i).idx,
                                         NULL, 0,
                                         ACL_LOGLEAVES);
 
@@ -567,13 +673,12 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         NULL, 0,
                                         acl);
 
-    iomt_free(acl);
-
     free(file_comp);
     free(file_orders);
 
     if(fr_cert.type == FR)
         return req;
+
     return req_null;
 }
 
@@ -825,7 +930,7 @@ void *sp_retrieve_file(struct service_provider *sp,
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
-    if(!rec || count_versions(sp, file_idx))
+    if(!rec || !count_versions(sp, file_idx))
     {
         /* Newly created file, no contents. We don't bother to set
          * *encrypted_secret or *len. Or, file does not exist. */
@@ -863,7 +968,7 @@ void *sp_retrieve_file(struct service_provider *sp,
     if(kf)
         *kf = ver->kf;
 
-    void *ret = read_contents(file_idx, version, len);
+    void *ret = read_contents(sp, file_idx, version, len);
 
     /* duplicate compose and build files */
     if(buildcode)
@@ -923,7 +1028,6 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                      user_req.modify_acl.file_idx,
                      acl,
                      &ack_hmac);
-        iomt_free(acl);
         if(write(cl, &ack_hmac, sizeof(ack_hmac)) != sizeof(ack_hmac))
             return;
         break;
@@ -1033,7 +1137,7 @@ int sp_main(int sockfd)
     signal(SIGPIPE, SIG_IGN);
 
     int logleaves = 10;
-    struct service_provider *sp = sp_new("a", 1, logleaves);
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files");
 
     while(1)
     {
@@ -1064,7 +1168,7 @@ void sp_test(void)
     printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
     clock_t start = clock();
-    struct service_provider *sp = sp_new("a", 1, logleaves);
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files");
     clock_t stop = clock();
     printf("%.1f placeholder insertions per second\n", (double)(1ULL << logleaves) * CLOCKS_PER_SEC / (stop - start));
 
@@ -1086,7 +1190,7 @@ void sp_test(void)
         hash_t correct_root = merkle_parent(hash_node(node1), hash_node(node2), 0);
         check("IOMT generation from file 2", hash_equals(iomt_getroot(buildcode), correct_root));
 
-#define N_MODIFY 1
+#define N_MODIFY 10
         start = clock();
         for(int i = 0; i < N_MODIFY; ++i)
             req = sp_modifyfile(sp, 1, test_sign_request, "a", 1, hash_null, hash_null, buildcode, NULL, "contents", 8, &ack_hmac);
@@ -1150,8 +1254,8 @@ void sp_test(void)
         hash_t ack;
         bool success = true;
 
-#define N_ACLMODIFY 100
-        for(int i = 0; i < 100; ++i)
+#define N_ACLMODIFY 10
+        for(int i = 0; i < N_ACLMODIFY; ++i)
         {
             struct tm_request req = sp_modifyacl(sp,
                                                  1,
@@ -1163,8 +1267,6 @@ void sp_test(void)
             success &= ack_verify(&req, "a", 1, ack);
         }
 
-        iomt_free(newacl);
-
         check("ACL modification 1", success);
     }
 
@@ -1172,14 +1274,6 @@ void sp_test(void)
     {
         printf("CDI-IOMT contents: ");
         iomt_dump(sp->iomt);
-    }
-
-    /* test tree initialization (only simple case) */
-    if(logleaves == 1)
-    {
-        struct iomt_node a = { 1, 2, u64_to_hash(2) };
-        struct iomt_node b = { 2, 1, hash_null };
-        check("Merkle tree initialization", hash_equals(iomt_getroot(sp->iomt), merkle_parent(hash_node(a), hash_node(b), 0)));
     }
 
     sp_free(sp);

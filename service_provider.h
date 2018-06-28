@@ -65,7 +65,7 @@ struct user_request {
 } __attribute__((packed));
 
 #ifndef CLIENT
-struct service_provider *sp_new(const void *key, size_t keylen, int logleaves);
+struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir);
 void sp_free(struct service_provider *sp);
 
 /* see .c file for documentation */

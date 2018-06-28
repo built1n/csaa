@@ -46,7 +46,7 @@ void run_tests(void)
 
 int main()
 {
-    run_tests();
+    //run_tests();
 
     const char *socket_name = "socket";
     int sockfd;
