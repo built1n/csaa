@@ -3,9 +3,10 @@
 
 #include <assert.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/socket.h>
@@ -227,6 +228,8 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 
     sp->data_dir = data_dir;
 
+    clock_t start = clock();
+    
     /* The trusted module initializes itself with a single placeholder
      * node (1,0,1). We first update our list of IOMT leaves. Then we
      * insert our desired number of nodes by using EQ certificates to
@@ -264,11 +267,17 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 #endif
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-        printf("%d\n", i);
+        //printf("%d\n", i);
     }
 
     commit_transaction(sp->db);
 
+    clock_t stop = clock();
+
+    printf("sp_init(): logleaves=%d, time=%.1fsec, rate=%.1f/sec\n",
+           logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
+           (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ));
+    
     return sp;
 }
 
@@ -1154,8 +1163,6 @@ int sp_main(int sockfd)
     }
 }
 
-#include <time.h>
-
 static hash_t test_sign_request(void *userdata, const struct tm_request *req)
 {
     const char *str = userdata;
@@ -1170,8 +1177,7 @@ void sp_test(void)
     clock_t start = clock();
     struct service_provider *sp = sp_new("a", 1, logleaves, "files");
     clock_t stop = clock();
-    printf("%.1f placeholder insertions per second\n", (double)(1ULL << logleaves) * CLOCKS_PER_SEC / (stop - start));
-
+    
     check("Tree initialization", sp != NULL);
 
     {
