@@ -221,6 +221,36 @@ hash_t hash_increment(hash_t h)
     return u64_to_hash(hash_to_u64(h) + 1);
 }
 
+/* workaround for old openssl */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+
+#include <string.h>
+#include <openssl/engine.h>
+
+ HMAC_CTX *HMAC_CTX_new(void)
+ {
+    HMAC_CTX *ctx = OPENSSL_malloc(sizeof(*ctx));
+    if (ctx != NULL) {
+        if (!HMAC_CTX_reset(ctx)) {
+            HMAC_CTX_free(ctx);
+            return NULL;
+        }
+    }
+    return ctx;
+ }
+
+ void HMAC_CTX_free(HMAC_CTX *ctx)
+ {
+    if (ctx != NULL) {
+        hmac_ctx_cleanup(ctx);
+        EVP_MD_CTX_free(ctx->i_ctx);
+        EVP_MD_CTX_free(ctx->o_ctx);
+        EVP_MD_CTX_free(ctx->md_ctx);
+        OPENSSL_free(ctx);
+    }
+ }
+#endif
+
 /* simple XOR cipher, so encryption and decryption are symmetric */
 hash_t crypt_secret(hash_t encrypted_secret,
                     uint64_t file_idx, uint64_t file_version,
