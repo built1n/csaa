@@ -125,7 +125,7 @@ void *sp_retrieve_file(struct service_provider *sp,
                        struct iomt **composefile,
                        size_t *len);
 
-int sp_main(int sockfd);
+int sp_main(int sockfd, int logleaves);
 
 void sp_test(void);
 #endif

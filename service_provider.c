@@ -1133,7 +1133,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
 }
 
-int sp_main(int sockfd)
+int sp_main(int sockfd, int logleaves)
 {
 #define BACKLOG 10
 
@@ -1145,7 +1145,8 @@ int sp_main(int sockfd)
 
     signal(SIGPIPE, SIG_IGN);
 
-    int logleaves = 10;
+    printf("Initializing IOMT with logleaves = %d...\n", logleaves);
+
     struct service_provider *sp = sp_new("a", 1, logleaves, "files");
 
     while(1)

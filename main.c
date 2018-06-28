@@ -44,9 +44,13 @@ void run_tests(void)
     sp_test();
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     //run_tests();
+
+    int logleaves = 10;
+    if(argc == 2)
+        logleaves = atol(argv[1]);
 
     const char *socket_name = "socket";
     int sockfd;
@@ -56,7 +60,7 @@ int main()
         return 1;
     }
 
-    printf("Listening on '%s'\n", socket_name);
+    printf("Listening on socket '%s'...\n", socket_name);
 
     cleanup_socket = socket_name;
 
@@ -65,5 +69,5 @@ int main()
     signal(SIGTERM, signal_handler);
     signal(SIGSEGV, signal_handler);
 
-    sp_main(sockfd);
+    sp_main(sockfd, logleaves);
 }
