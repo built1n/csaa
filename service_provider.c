@@ -209,12 +209,12 @@ void commit_transaction(void *db)
 }
 
 /* leaf count will be 2^logleaves */
-struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir)
+struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir, const char *dbpath)
 {
     assert(logleaves > 0);
     struct service_provider *sp = calloc(1, sizeof(*sp));
 
-    sp->db = db_init("csaa.db");
+    sp->db = db_init(dbpath);
 
     sp->tm = tm_new(key, keylen);
 
@@ -262,7 +262,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 #endif
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-        printf("%d\n", i);
+        //printf("%d\n", i);
     }
 
     /* now transfer to database */
@@ -288,7 +288,7 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 
     clock_t stop = clock();
 
-    printf("sp_init(): logleaves=%d, time=%.1fsec, overall_rate=%.1f/sec, db_time=%.1fsec\n",
+    printf("sp_init(): logleaves=%d, time=%.3fsec, overall_rate=%.3f/sec, db_time=%.3fsec\n",
            logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
            (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ),
            (double)(stop - point1) / CLOCKS_PER_SEC);
@@ -1148,7 +1148,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
 }
 
-int sp_main(int sockfd, int logleaves)
+int sp_main(int sockfd, int logleaves, const char *dbpath)
 {
 #define BACKLOG 10
 
@@ -1162,7 +1162,10 @@ int sp_main(int sockfd, int logleaves)
 
     printf("Initializing IOMT with logleaves = %d...\n", logleaves);
 
-    struct service_provider *sp = sp_new("a", 1, logleaves, "files");
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath);
+
+    /* test init only */
+    return 0;
 
     while(1)
     {
@@ -1191,7 +1194,7 @@ void sp_test(void)
     printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
     clock_t start = clock();
-    struct service_provider *sp = sp_new("a", 1, logleaves, "files");
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaa.db");
     clock_t stop = clock();
 
     check("Tree initialization", sp != NULL);

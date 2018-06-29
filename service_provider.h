@@ -65,7 +65,11 @@ struct user_request {
 } __attribute__((packed));
 
 #ifndef CLIENT
-struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir);
+struct service_provider *sp_new(const void *key,
+                                size_t keylen,
+                                int logleaves,
+                                const char *data_dir,
+                                const char *dbpath);
 void sp_free(struct service_provider *sp);
 
 /* see .c file for documentation */
@@ -125,7 +129,7 @@ void *sp_retrieve_file(struct service_provider *sp,
                        struct iomt **composefile,
                        size_t *len);
 
-int sp_main(int sockfd, int logleaves);
+int sp_main(int sockfd, int logleaves, const char *dbpath);
 
 void sp_test(void);
 #endif
