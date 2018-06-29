@@ -8,21 +8,17 @@ ACL_logleaves INTEGER
 );
 
 CREATE TABLE FileLeaves (
-FileIdx INTEGER,
 LeafIdx INTEGER,
 Idx INTEGER,
 NextIdx INTEGER,
 Val BLOB,
-PRIMARY KEY (FileIdx, LeafIdx),
-FOREIGN KEY (FileIdx) REFERENCES FileRecords(Idx)
+PRIMARY KEY (LeafIdx)
 );
 
 CREATE TABLE FileNodes (
-FileIdx INTEGER,
 NodeIdx INTEGER,
 Val BLOB,
-PRIMARY KEY (FileIdx, NodeIdx),
-FOREIGN KEY (FileIdx) REFERENCES FileRecords(Idx)
+PRIMARY KEY (NodeIdx)
 );
 
 CREATE TABLE Versions (
