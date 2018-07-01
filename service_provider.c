@@ -256,13 +256,13 @@ struct service_provider *sp_new(const void *key, size_t keylen,
 
     sp->tm = tm_new(key, keylen);
 
-    /* create IOMT in memory first, then commit to DB */
-    sp->iomt = iomt_new(logleaves);
-
     sp->data_dir = data_dir;
 
     if(iomt_init)
     {
+        /* create IOMT in memory first, then commit to DB */
+        sp->iomt = iomt_new(logleaves);
+
         printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
         clock_t start = clock();
@@ -329,6 +329,12 @@ struct service_provider *sp_new(const void *key, size_t keylen,
     }
     else
     {
+        sp->iomt = iomt_new_from_db(sp->db,
+                                    "FileNodes", "FileLeaves",
+                                    NULL, 0,
+                                    NULL, 0,
+                                    logleaves);
+
         int leaves = count_rows(sp->db, "FileLeaves");
         if(leaves != (1ULL << logleaves))
             warn("logleaves value is inconsistent with leaf count in IOMT! (have %d, expect %d)",
@@ -688,25 +694,45 @@ struct tm_cert sp_request(struct service_provider *sp,
     return fr;
 }
 
+/* returns a leaf idx (not a file idx!) */
+static uint64_t find_empty_slot(struct service_provider *sp)
+{
+    static sqlite3_stmt *st = NULL;
+
+    sqlite3 *handle = sp->db;
+
+    if(!st)
+    {
+        const char *sql = "SELECT LeafIdx FROM FileLeaves WHERE Val = ?1 LIMIT 1;";
+        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    }
+    else
+        sqlite3_reset(st);
+
+    sqlite3_bind_blob(st, 1, &hash_null, sizeof(hash_null), SQLITE_STATIC);
+
+    int rc = sqlite3_step(st);
+
+    if(rc == SQLITE_ROW)
+    {
+        return sqlite3_column_int(st, 0);
+    }
+
+    return (uint64_t) -1;
+}
+
 struct tm_request sp_createfile(struct service_provider *sp,
                                 uint64_t user_id,
                                 hash_t (*sign_request)(void *userdata, const struct tm_request *req),
                                 void *userdata,
                                 hash_t *ack_hmac)
 {
-    int i;
+    uint64_t i = find_empty_slot(sp);
 
-    /* TODO: use database? */
-    /* Find an empty leaf node */
-    for(i = 0; i < sp->iomt->mt_leafcount; ++i)
+    if(i == (uint64_t) -1)
     {
-        if(is_zero(iomt_getleaf(sp->iomt, i).val))
-            break;
-    }
-
-    /* fail */
-    if(i == sp->iomt->mt_leafcount)
-    {
+        /* TODO: grow tree? */
+        printf("Out of slots!\n");
         return req_null;
     }
 
@@ -819,6 +845,7 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                 hash_t *ack_hmac)
 {
     /* modification */
+    printf("Modify file %d\n", file_idx);
     struct file_record *rec = lookup_record(sp, file_idx);
     if(!rec)
     {
@@ -829,6 +856,12 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     int *file_orders, *acl_orders;
     uint64_t file_leafidx;
     struct iomt_node file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
+
+    if(!file_node.idx)
+    {
+        printf("Couldn't find file node???\n");
+        return req_null;
+    }
 
     hash_t *file_comp = merkle_complement(sp->iomt,
                                           file_leafidx,

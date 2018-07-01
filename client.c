@@ -321,8 +321,8 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req,
          * want */
         struct iomt_node acl_node = { req->user_id, req->user_id, u64_to_hash(3) };
         if(tmr.type != ACL_UPDATE ||
-           tmr.idx == 0 ||
-           tmr.counter != 0 ||
+           tmr.idx == 0           ||
+           tmr.counter != 0       ||
            !hash_equals(hash_node(acl_node), tmr.val))
         {
             printf("Refusing to sign request because %d %d %d %d\n", tmr.type != ACL_UPDATE,
