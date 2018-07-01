@@ -1,9 +1,19 @@
-all: client server Makefile
-CFLAGS = -g -Wall -O3 -lsqlite3
+all: client server dummy_client dummy_server
+CFLAGS = -g -Wall -O0 -lsqlite3
 
+sqlinit.c: sqlinit.txt
+	xxd -i $^ | sed 's/\([0-9a-f]\)$$/\0, 0x00/' > $@
+
+dummy_main.o: main.c
+	cc -c -o $@ $^ -DDUMMY $(CFLAGS)
+
+dummy_client: dummy_client.o crypto.o test.o iomt.o
+	cc -o $@ $^ -lcrypto $(CFLAGS)
+dummy_server: dummy_service.o dummy_main.o sqlinit.o
+	cc -o $@ $^ -lcrypto $(CFLAGS)
 client: client.o crypto.o test.o iomt.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
-server: service_provider.o crypto.o helper.o trusted_module.o main.o test.o iomt.o
+server: service_provider.o crypto.o helper.o trusted_module.o main.o test.o iomt.o sqlinit.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
 clean:
-	rm -f *.o a.out client server
+	rm -f *.o a.out client server dummy_client dummy_server

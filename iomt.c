@@ -306,7 +306,9 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
 
 hash_t iomt_getroot(const struct iomt *tree)
 {
-    return iomt_getnode(tree, 0);
+    if(tree)
+        return iomt_getnode(tree, 0);
+    return hash_null;
 }
 
 /* find a node with given idx */
@@ -570,6 +572,7 @@ struct iomt *iomt_dup(const struct iomt *oldtree)
     newtree->mt_leafcount = oldtree->mt_leafcount;
     newtree->mt_logleaves = oldtree->mt_logleaves;
 
+    newtree->in_memory = true;
     newtree->mem.mt_leaves = calloc(oldtree->mt_leafcount, sizeof(struct iomt_node));
     newtree->mem.mt_nodes = calloc(2 * oldtree->mt_leafcount - 1, sizeof(hash_t));
 

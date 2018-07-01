@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "crypto.h"
 #include "service_provider.h"
 #include "trusted_module.h"
 

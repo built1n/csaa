@@ -184,7 +184,26 @@ void *read_contents(const struct service_provider *sp,
     return buf;
 }
 
-void *db_init(const char *filename)
+int count_rows(void *db, const char *table)
+{
+    char buf[1000];
+    snprintf(buf, sizeof(buf), "SELECT COUNT(*) FROM %s;", table);
+
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(db, buf, -1, &st, 0);
+
+    /* no table */
+    if(sqlite3_step(st) != SQLITE_ROW)
+        return 0;
+
+    int rows = sqlite3_column_int(st, 0);
+
+    sqlite3_finalize(st);
+
+    return rows;
+}
+
+void *db_init(const char *filename, bool overwrite, bool *need_init)
 {
     sqlite3 *db;
     if(sqlite3_open(filename, &db) != SQLITE_OK)
@@ -192,6 +211,19 @@ void *db_init(const char *filename)
 
     sqlite3_exec(db, "PRAGMA synchronous = 0;", 0, 0, 0);
     sqlite3_exec(db, "PRAGMA journal_mode = memory;", 0, 0, 0);
+
+    if(overwrite || count_rows(db, "FileLeaves") == 0)
+    {
+        extern unsigned char sqlinit_txt[];
+
+        /* create tables */
+        char *msg;
+        assert(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, &msg) == SQLITE_OK);
+
+        *need_init = true;
+    }
+    else
+        *need_init = false;
 
     return db;
 }
@@ -209,12 +241,18 @@ void commit_transaction(void *db)
 }
 
 /* leaf count will be 2^logleaves */
-struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, const char *data_dir, const char *dbpath)
+/* will use old DB contents unless overwrite_db is true */
+struct service_provider *sp_new(const void *key, size_t keylen,
+                                int logleaves,
+                                const char *data_dir,
+                                const char *dbpath,
+                                bool overwrite_db)
 {
     assert(logleaves > 0);
     struct service_provider *sp = calloc(1, sizeof(*sp));
 
-    sp->db = db_init(dbpath);
+    bool iomt_init = true;
+    sp->db = db_init(dbpath, overwrite_db, &iomt_init);
 
     sp->tm = tm_new(key, keylen);
 
@@ -223,75 +261,79 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 
     sp->data_dir = data_dir;
 
-    clock_t start = clock();
-
-    /* The trusted module initializes itself with a single placeholder
-     * node (1,0,1). We first update our list of IOMT leaves. Then we
-     * insert our desired number of nodes by using EQ certificates to
-     * update the internal IOMT root. Note that leaf indices are
-     * 1-indexed. */
-    iomt_update_leaf_full(sp->iomt,
-                           0,
-                           1, 1, hash_null);
-
-    for(int i = 1; i < sp->iomt->mt_leafcount; ++i)
+    if(iomt_init)
     {
-        /* generate EQ certificate */
-        hash_t hmac;
-        struct tm_cert eq = cert_eq(sp,
-                                    iomt_getleaf(sp->iomt, i - 1),
-                                    i - 1,
-                                    i, i + 1,
-                                    &hmac);
-        assert(eq.type == EQ);
+        printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
-        /* update previous leaf's index */
-        iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
+        clock_t start = clock();
 
-        /* next_idx is set to 1 to keep everything circularly linked;
-         * in the next iteration it will be updated to point to the
-         * next node, if any */
-        iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
+        /* The trusted module initializes itself with a single placeholder
+         * node (1,0,1). We first update our list of IOMT leaves. Then we
+         * insert our desired number of nodes by using EQ certificates to
+         * update the internal IOMT root. Note that leaf indices are
+         * 1-indexed. */
+        iomt_update_leaf_full(sp->iomt,
+                              0,
+                              1, 1, hash_null);
 
-#if 0
-        if(i % 10 == 0)
+        for(int i = 1; i < sp->iomt->mt_leafcount; ++i)
         {
-            commit_transaction(sp->db);
-            begin_transaction(sp->db);
+            /* generate EQ certificate */
+            hash_t hmac;
+            struct tm_cert eq = cert_eq(sp,
+                                        iomt_getleaf(sp->iomt, i - 1),
+                                        i - 1,
+                                        i, i + 1,
+                                        &hmac);
+            assert(eq.type == EQ);
+
+            /* update previous leaf's index */
+            iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
+
+            /* next_idx is set to 1 to keep everything circularly linked;
+             * in the next iteration it will be updated to point to the
+             * next node, if any */
+            iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
+
+            assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+            //printf("%d\n", i);
         }
-#endif
 
-        assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-        //printf("%d\n", i);
+        /* now transfer to database */
+        printf("IOMT initialized in memory, transferring to DB...\n");
+
+        clock_t point1 = clock();
+
+        begin_transaction(sp->db);
+
+        /* we must do it this way because cert_eq expects sp->iomt to be
+         * the working tree */
+        struct iomt *old = sp->iomt;
+
+        sp->iomt = iomt_dup_in_db(sp->db,
+                                  "FileNodes", "FileLeaves",
+                                  NULL, 0,
+                                  NULL, 0,
+                                  old);
+
+        commit_transaction(sp->db);
+
+        iomt_free(old);
+
+        clock_t stop = clock();
+
+        printf("sp_init(): logleaves=%d, time=%.3fsec, overall_rate=%.3f/sec, db_time=%.3fsec\n",
+               logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
+               (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ),
+               (double)(stop - point1) / CLOCKS_PER_SEC);
     }
-
-    /* now transfer to database */
-    printf("IOMT initialized in memory, transferring to DB...\n");
-
-    clock_t point1 = clock();
-
-    begin_transaction(sp->db);
-
-    /* we must do it this way because cert_eq expects sp->iomt to be
-     * the working tree */
-    struct iomt *old = sp->iomt;
-
-    sp->iomt = iomt_dup_in_db(sp->db,
-                              "FileNodes", "FileLeaves",
-                              NULL, 0,
-                              NULL, 0,
-                              old);
-
-    commit_transaction(sp->db);
-
-    iomt_free(old);
-
-    clock_t stop = clock();
-
-    printf("sp_init(): logleaves=%d, time=%.3fsec, overall_rate=%.3f/sec, db_time=%.3fsec\n",
-           logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
-           (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ),
-           (double)(stop - point1) / CLOCKS_PER_SEC);
+    else
+    {
+        int leaves = count_rows(sp->db, "FileLeaves");
+        if(leaves != (1ULL << logleaves))
+            warn("logleaves value is inconsistent with leaf count in IOMT! (have %d, expect %d)",
+                 leaves, 1 << logleaves);
+    }
 
     return sp;
 }
@@ -596,6 +638,7 @@ struct tm_cert sp_request(struct service_provider *sp,
             else
             {
                 ver.encrypted_secret = hash_null;
+                ver.kf = hash_null;
             }
 
             ver.version = fr.fr.version;
@@ -653,6 +696,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
 {
     int i;
 
+    /* TODO: use database? */
     /* Find an empty leaf node */
     for(i = 0; i < sp->iomt->mt_leafcount; ++i)
     {
@@ -816,6 +860,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     struct tm_cert vr;
     hash_t vr_hmac, fr_hmac;
 
+    printf("Modifying file with new kf=%s.\n", hash_format(kf, 4).str);
+
     struct tm_cert new_fr = sp_request(sp,
                                        &req, req_hmac,
                                        &fr_hmac,
@@ -920,6 +966,8 @@ struct version_info sp_fileinfo(struct service_provider *sp,
 
     struct file_version *ver = lookup_version(sp, rec->idx, version);
 
+    printf("Version kf=%s\n", hash_format(ver->kf, 4).str);
+
     if(acl_out)
         *acl_out = iomt_dup(rec->acl);
 
@@ -966,6 +1014,12 @@ void *sp_retrieve_file(struct service_provider *sp,
         version = count_versions(sp, file_idx);
 
     struct file_version *ver = lookup_version(sp, file_idx, version);
+
+    if(!ver)
+    {
+        *len = 0;
+        return NULL;
+    }
 
     hash_t rv1_hmac, rv2_hmac;
     struct tm_cert rv1 = cert_rv_by_idx(sp->tm, sp->iomt, file_idx, &rv1_hmac);
@@ -1148,7 +1202,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
 }
 
-int sp_main(int sockfd, int logleaves, const char *dbpath)
+int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
 {
 #define BACKLOG 10
 
@@ -1160,12 +1214,7 @@ int sp_main(int sockfd, int logleaves, const char *dbpath)
 
     signal(SIGPIPE, SIG_IGN);
 
-    printf("Initializing IOMT with logleaves = %d...\n", logleaves);
-
-    struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath);
-
-    /* test init only */
-    return 0;
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath, overwrite);
 
     while(1)
     {
@@ -1191,10 +1240,9 @@ static hash_t test_sign_request(void *userdata, const struct tm_request *req)
 void sp_test(void)
 {
     int logleaves = 1;
-    printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
     clock_t start = clock();
-    struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaa.db");
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaa.db", true);
     clock_t stop = clock();
 
     check("Tree initialization", sp != NULL);

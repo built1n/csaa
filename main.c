@@ -37,23 +37,33 @@ void signal_handler(int sig)
     exit(1);
 }
 
+#ifndef DUMMY
 void run_tests(void)
 {
     crypto_test();
     tm_test();
     sp_test();
 }
+#endif
 
 int main(int argc, char *argv[])
 {
+#ifndef DUMMY
     //run_tests();
+#endif
 
+    bool overwrite = false;
+
+    /* TODO: real parsing */
     const char *dbpath = "csaa.db";
     int logleaves = 10;
     if(argc >= 2)
         logleaves = atol(argv[1]);
     if(argc >= 3)
         dbpath = argv[2];
+    if(argc >= 4)
+        if(!strcmp(argv[3], "--overwrite"))
+            overwrite = true;
 
     const char *socket_name = "socket";
     int sockfd;
@@ -71,6 +81,7 @@ int main(int argc, char *argv[])
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     signal(SIGSEGV, signal_handler);
+    signal(SIGABRT, signal_handler);
 
-    sp_main(sockfd, logleaves, dbpath);
+    sp_main(sockfd, logleaves, dbpath, overwrite);
 }

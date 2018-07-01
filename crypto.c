@@ -1,3 +1,5 @@
+/* crypto and other generally useful stuff, shared by all code */
+
 #include "crypto.h"
 #include "iomt.h"
 #include "trusted_module.h"
@@ -350,10 +352,14 @@ hash_t derive_key(const char *passphrase, hash_t nonce)
 
 hash_t calc_kf(hash_t encryption_key, uint64_t file_idx)
 {
-    if(is_zero(encryption_key))
-        return hash_null;
-    return hmac_sha256(&encryption_key, sizeof(encryption_key),
-                       &file_idx, sizeof(file_idx));
+    hash_t kf = hash_null;
+    if(!is_zero(encryption_key))
+        kf = hmac_sha256(&encryption_key, sizeof(encryption_key),
+                         &file_idx, sizeof(file_idx));
+    printf("calc_kf: encryption key = %s, file_idx = %lu, kf = %s\n",
+           hash_format(encryption_key, 4).str, file_idx,
+           hash_format(kf, 4).str);
+    return kf;
 }
 
 void memxor(unsigned char *dest, const unsigned char *b, size_t len)
@@ -451,6 +457,17 @@ void dump_versioninfo(const struct version_info *verinfo)
            verinfo->idx, verinfo->counter, verinfo->version, verinfo->max_version,
            hash_format(verinfo->current_acl, 4).str,
            hash_format(verinfo->lambda, 4).str);
+}
+
+void warn(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    char buf[256];
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+
+    fprintf(stderr, "\033[31;1mWARNING\033[0m: %s\n", buf);
 }
 
 void crypto_test(void)

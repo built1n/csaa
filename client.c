@@ -85,10 +85,6 @@ void print_usage(const char *name)
            "  retrieveinfo -f FILEIDX [-v VERSION]\n"
            "\n"
            "  retrievefile -f FILEIDX [-v VERSION] -o IMAGE_OUT\n");
-    for(int i = 0; i < 10; ++i)
-    {
-        printf("%d %d\n", i, ilog2(i));
-    }
 }
 
 bool parse_args(int argc, char *argv[])
@@ -308,7 +304,8 @@ bool parse_args(int argc, char *argv[])
     }
 }
 
-static struct tm_request verify_and_sign(int fd, const struct user_request *req)
+/* val is lambda for FILE_UPDATE, ignored for create, and the ACL root for ACL_MODIFY */
+static struct tm_request verify_and_sign(int fd, const struct user_request *req, hash_t val)
 {
     struct tm_request tmr = req_null;
     if(recv(fd, &tmr, sizeof(tmr), MSG_WAITALL) != sizeof(tmr))
@@ -338,12 +335,20 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req)
     }
     case MODIFY_FILE:
     {
-        /* TODO */
+        if(tmr.type != FILE_UPDATE     ||
+           tmr.user_id != req->user_id ||
+           tmr.idx != req->file_idx    ||
+           !hash_equals(tmr.val, val))
+            return req_null;
         break;
     }
     case MODIFY_ACL:
     {
-        /* TODO */
+        if(tmr.type != ACL_UPDATE      ||
+           tmr.user_id != req->user_id ||
+           tmr.idx != req->file_idx    ||
+           !hash_equals(tmr.val, val))
+            return req_null;
         break;
     }
     default:
@@ -417,7 +422,19 @@ bool exec_request(int fd, const struct user_request *req,
     case MODIFY_FILE:
     {
         /* verify module ack */
-        struct tm_request tmr = verify_and_sign(fd, req);
+        hash_t val = hash_null;
+        if(req->type == MODIFY_FILE)
+        {
+            hash_t gamma = sha256(new_file_contents, len);
+            val = calc_lambda(gamma,
+                              new_buildcode,
+                              new_composefile,
+                              req->modify_file.kf);
+        }
+        else if(req->type == MODIFY_ACL)
+            val = iomt_getroot(new_acl);
+
+        struct tm_request tmr = verify_and_sign(fd, req, val);
         if(tmreq_out)
             *tmreq_out = tmr;
         return verify_sp_ack(fd, &tmr);
@@ -451,9 +468,14 @@ bool exec_request(int fd, const struct user_request *req,
         recv(fd, &encrypted_secret, sizeof(encrypted_secret), MSG_WAITALL);
         recv(fd, &kf, sizeof(kf), MSG_WAITALL);
 
-        hash_t pad = hmac_sha256(&kf, sizeof(kf),
-                                 user_key, keylen);
-        *secret_out = hash_xor(encrypted_secret, pad);
+        if(!is_zero(kf))
+        {
+            hash_t pad = hmac_sha256(&kf, sizeof(kf),
+                                     user_key, keylen);
+            *secret_out = hash_xor(encrypted_secret, pad);
+        }
+        else
+            *secret_out = hash_null;
 
         *buildcode = iomt_deserialize(read_from_fd, &fd);
         *composefile = iomt_deserialize(read_from_fd, &fd);
@@ -642,6 +664,8 @@ bool server_request(const char *sockpath,
                                 req.type == RETRIEVE_FILE ? &file_contents : NULL,
                                 req.type == RETRIEVE_FILE ? &file_len : NULL);
 
+    close(fd);
+
     printf("Request %s\n",
            success ?
            "\033[32;1msucceeded\033[0m" :
@@ -678,7 +702,26 @@ bool server_request(const char *sockpath,
         printf("Writing image file to %s.\n", image_path);
         write_file(image_path, file_contents, file_len);
         /* What about build code? We only have the IOMT, not the actual contents. */
-        break;
+
+        /* Verify contents */
+        int fd = connect_to_service(sockpath);
+        struct version_info verinfo = request_verinfo(fd, user_id,
+                                                      user_key, strlen(user_key),
+                                                      req.file_idx,
+                                                      0);
+        close(fd);
+
+        bool success = hash_equals(lambda, verinfo.lambda);
+
+        if(!success)
+        {
+            printf("Could not verify integrity of response (lambda should be %s).\n",
+                   hash_format(verinfo.lambda, 4).str);
+        }
+        else
+            printf("Successfully verifed integrity of file.\n");
+
+        return success;
     }
     default:
         break;
