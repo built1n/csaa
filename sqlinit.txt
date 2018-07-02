@@ -17,7 +17,8 @@ Ver INTEGER,
 Ctr INTEGER,
 Cert BLOB,
 HMAC BLOB,
-ACL_logleaves INTEGER
+ACL_logleaves INTEGER,
+PRIMARY KEY (Idx)
 );
 
 CREATE TABLE IF NOT EXISTS FileLeaves (
