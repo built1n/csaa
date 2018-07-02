@@ -696,6 +696,18 @@ void iomt_free(struct iomt *tree)
             free(tree->mem.mt_nodes);
             free(tree->mem.mt_leaves);
         }
+        else
+        {
+            sqlite3_finalize(tree->db.getnode);
+            sqlite3_finalize(tree->db.updatenode);
+            sqlite3_finalize(tree->db.insertnode);
+            sqlite3_finalize(tree->db.getleaf);
+            sqlite3_finalize(tree->db.updateleaf);
+            sqlite3_finalize(tree->db.insertleaf);
+            sqlite3_finalize(tree->db.findleaf);
+            sqlite3_finalize(tree->db.findencloser);
+            sqlite3_finalize(tree->db.findleaf_or_encloser);
+        }
         free(tree);
     }
 }
