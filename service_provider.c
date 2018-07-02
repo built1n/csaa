@@ -335,6 +335,8 @@ struct service_provider *sp_new(const void *key, size_t keylen,
                                     NULL, 0,
                                     logleaves);
 
+        warn("resuming from previous database; module will fail");
+
         int leaves = count_rows(sp->db, "FileLeaves");
         if(leaves != (1ULL << logleaves))
             warn("logleaves value is inconsistent with leaf count in IOMT! (have %d, expect %d)",
@@ -998,8 +1000,6 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                         &rv2_hmac);
 
     struct file_version *ver = lookup_version(sp, rec->idx, version);
-
-    printf("Version kf=%s\n", hash_format(ver->kf, 4).str);
 
     if(acl_out)
         *acl_out = iomt_dup(rec->acl);
