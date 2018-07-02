@@ -148,8 +148,9 @@ bool parse_args(int argc, char *argv[])
         }
         else
         {
-            parse_args_fail = "Unknown parameter";
-            return false;
+            /* ignore unknowns */
+            //parse_args_fail = "Unknown parameter";
+            //return false;
         }
     }
     if(cl_request.type != USERREQ_NONE && user_id != 0)

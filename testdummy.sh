@@ -5,7 +5,9 @@ then
    exit 1
 fi
 echo "Initializing..."
-./dummy_server 10 csaa.db --overwrite > /dev/null &
+rm csaa.db
+sqlite3 csaa.db < sqlinit.txt
+./dummy_server $1 csaa.db > /dev/null &
 pid=$!
 sleep 5
 time ./testcreate.sh ./dummy_client

@@ -743,10 +743,12 @@ int main(int argc, char *argv[]) {
 
     signal(SIGPIPE, SIG_IGN);
 
-    server_request(socket_path, userkey, user_id,
-                   cl_request, new_acl,
-                   buildcode_path, compose_path, image_path,
-                   file_key);
+    bool success = server_request(socket_path, userkey, user_id,
+                                  cl_request, new_acl,
+                                  buildcode_path, compose_path, image_path,
+                                  file_key);
+
+    return !success;
 
 #if 0
     fd = connect_to_service(socket_path);
@@ -772,6 +774,4 @@ int main(int argc, char *argv[]) {
                                                    NULL, NULL, NULL, NULL, NULL));
     close(fd);
 #endif
-
-    return 0;
 }
