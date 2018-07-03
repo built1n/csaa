@@ -146,7 +146,7 @@ uint64_t *bintree_complement(uint64_t leafidx, int logleaves, int **orders)
         *orders = calloc(logleaves, sizeof(int));
 
     /* true index of leaf */
-    uint64_t idx = (1 << logleaves) - 1 + leafidx;
+    uint64_t idx = ((uint64_t)1 << logleaves) - 1 + leafidx;
 
     /* progress up the tree */
     for(int i = 0; i < logleaves; ++i)
@@ -169,7 +169,7 @@ uint64_t *bintree_ancestors(uint64_t leafidx, int logleaves)
 {
     uint64_t *dep = calloc(logleaves, sizeof(uint64_t));
 
-    uint64_t idx = (1 << logleaves) - 1 + leafidx;
+    uint64_t idx = ((uint64_t)1 << logleaves) - 1 + leafidx;
     for(int i = 0; i < logleaves; ++i)
     {
         idx = bintree_parent(idx);

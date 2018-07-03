@@ -189,15 +189,15 @@ void iomt_fill(struct iomt *tree)
 {
     for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
     {
-        uint64_t mt_idx = (1 << tree->mt_logleaves) - 1 + i;
+        uint64_t mt_idx = ((uint64_t)1 << tree->mt_logleaves) - 1 + i;
         iomt_setnode(tree, mt_idx, hash_node(iomt_getleaf(tree, i)));
     }
     /* now loop up from the bottom level, calculating the parent of
      * each pair of nodes */
     for(int i = tree->mt_logleaves - 1; i >= 0; --i)
     {
-        uint64_t baseidx = (1 << i) - 1;
-        for(uint64_t j = 0; j < (1 << i); ++j)
+        uint64_t baseidx = ((uint64_t)1 << i) - 1;
+        for(uint64_t j = 0; j < ((uint64_t)1 << i); ++j)
         {
             uint64_t mt_idx = baseidx + j;
             iomt_setnode(tree, mt_idx, merkle_parent(iomt_getnode(tree, 2 * mt_idx + 1),
@@ -240,7 +240,7 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
     if(old_dep)
         *old_dep = calloc(tree->mt_logleaves, sizeof(hash_t));
 
-    uint64_t idx = (1 << tree->mt_logleaves) - 1 + leafidx;
+    uint64_t idx = ((uint64_t)1 << tree->mt_logleaves) - 1 + leafidx;
 
     iomt_setnode(tree, idx, newval);
     for(int i = 0; i < tree->mt_logleaves; ++i)
@@ -438,7 +438,7 @@ struct iomt *iomt_new(int logleaves)
 
     tree->in_memory = true;
 
-    tree->mt_leafcount = 1UL << logleaves;
+    tree->mt_leafcount = (uint64_t)1 << logleaves;
     tree->mt_logleaves = logleaves;
     tree->mem.mt_leaves = calloc(tree->mt_leafcount, sizeof(struct iomt_node));
 
@@ -500,7 +500,7 @@ struct iomt *iomt_new_from_db(void *db,
 
     tree->in_memory = false;
 
-    tree->mt_leafcount = 1UL << logleaves;
+    tree->mt_leafcount = (uint64_t)1 << logleaves;
     tree->mt_logleaves = logleaves;
 
     tree->db.db = db;
