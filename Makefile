@@ -1,5 +1,5 @@
 all: client server dummy_client dummy_server
-CFLAGS = -g -Wall -Wformat-overflow=0 -O0 -lsqlite3 -ftrapv
+CFLAGS = -g -Wall -Wformat-overflow=0 -O3 -lsqlite3 -ftrapv
 
 sqlinit.c: sqlinit.txt
 	xxd -i $^ | sed 's/\([0-9a-f]\)$$/\0, 0x00/' > $@
