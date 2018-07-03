@@ -125,7 +125,7 @@ struct tm_cert cert_eq(struct service_provider *sp,
                                              &nu2_hmac);
 
     /* restore the tree */
-    int *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
+    uint64_t *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
 
     free(dep_indices);
@@ -141,18 +141,18 @@ struct tm_cert cert_eq(struct service_provider *sp,
 
 /* write to file data_dir/file_idx/version */
 void write_contents(const struct service_provider *sp,
-                    int file_idx, int version,
+                    uint64_t file_idx, uint64_t version,
                     const void *data, size_t len)
 {
     mkdir(sp->data_dir, 0755);
 
     char dirname[MAX_PATH];
-    snprintf(dirname, sizeof(dirname), "%s/%d", sp->data_dir, file_idx);
+    snprintf(dirname, sizeof(dirname), "%s/%lu", sp->data_dir, file_idx);
 
     mkdir(dirname, 0755);
 
     char filename[MAX_PATH];
-    snprintf(filename, sizeof(filename), "%s/%d/%d", sp->data_dir, file_idx, version);
+    snprintf(filename, sizeof(filename), "%s/%lu/%lu", sp->data_dir, file_idx, version);
 
     FILE *f = fopen(filename, "w");
 
@@ -172,11 +172,11 @@ size_t file_len(FILE *f)
 }
 
 void *read_contents(const struct service_provider *sp,
-                    int file_idx, int version,
+                    uint64_t file_idx, uint64_t version,
                     size_t *len)
 {
     char filename[MAX_PATH];
-    snprintf(filename, sizeof(filename), "%s/%d/%d", sp->data_dir, file_idx, version);
+    snprintf(filename, sizeof(filename), "%s/%lu/%lu", sp->data_dir, file_idx, version);
 
     FILE *f = fopen(filename, "r");
 
@@ -254,6 +254,9 @@ struct service_provider *sp_new(const void *key, size_t keylen,
                                 bool overwrite_db)
 {
     assert(logleaves > 0);
+    if(logleaves >= 63)
+        warn("logleaves value too large, will likely fail");
+
     struct service_provider *sp = calloc(1, sizeof(*sp));
 
     bool iomt_init = true;
@@ -346,16 +349,16 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
     sqlite3_stmt *st;
 
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, idx);
+    sqlite3_bind_int64(st, 1, idx);
 
     int rc = sqlite3_step(st);
     if(rc == SQLITE_ROW)
     {
         struct file_record *rec = calloc(1, sizeof(struct file_record));
 
-        rec->idx = sqlite3_column_int(st, 0);
-        rec->version = sqlite3_column_int(st, 1);
-        rec->counter = sqlite3_column_int(st, 2);
+        rec->idx = sqlite3_column_int64(st, 0);
+        rec->version = sqlite3_column_int64(st, 1);
+        rec->counter = sqlite3_column_int64(st, 2);
         memcpy(&rec->fr_cert, sqlite3_column_blob(st, 3), sizeof(rec->fr_cert));
         memcpy(&rec->fr_hmac, sqlite3_column_blob(st, 4), sizeof(rec->fr_hmac));
 
@@ -385,9 +388,9 @@ static void insert_record(struct service_provider *sp, const struct file_record 
     const char *sql = "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 );";
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, rec->idx);
-    sqlite3_bind_int(st, 2, rec->version);
-    sqlite3_bind_int(st, 3, rec->counter);
+    sqlite3_bind_int64(st, 1, rec->idx);
+    sqlite3_bind_int64(st, 2, rec->version);
+    sqlite3_bind_int64(st, 3, rec->counter);
     sqlite3_bind_blob(st, 4, &rec->fr_cert, sizeof(rec->fr_cert), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 5, &rec->fr_hmac, sizeof(rec->fr_hmac), SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
@@ -410,13 +413,13 @@ static void update_record(struct service_provider *sp,
 
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, rec->idx);
-    sqlite3_bind_int(st, 2, rec->version);
-    sqlite3_bind_int(st, 3, rec->counter);
+    sqlite3_bind_int64(st, 1, rec->idx);
+    sqlite3_bind_int64(st, 2, rec->version);
+    sqlite3_bind_int64(st, 3, rec->counter);
     sqlite3_bind_blob(st, 4, &rec->fr_cert, sizeof(rec->fr_cert), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 5, &rec->fr_hmac, sizeof(rec->fr_hmac), SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
-    sqlite3_bind_int(st, 7, rec->idx);
+    sqlite3_bind_int64(st, 7, rec->idx);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
 
@@ -432,8 +435,8 @@ static void insert_version(struct service_provider *sp,
     const char *sql = "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 );";
     sqlite3_stmt *st;
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, rec->idx);
-    sqlite3_bind_int(st, 2, ver->version);
+    sqlite3_bind_int64(st, 1, rec->idx);
+    sqlite3_bind_int64(st, 2, ver->version);
     sqlite3_bind_blob(st, 3, &ver->kf, sizeof(ver->kf), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 4, &ver->encrypted_secret, sizeof(ver->encrypted_secret), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 5, &ver->vr_cert, sizeof(ver->vr_cert), SQLITE_TRANSIENT);
@@ -452,7 +455,7 @@ static void insert_version(struct service_provider *sp,
     sqlite3_finalize(st);
 }
 
-static int count_versions(struct service_provider *sp,
+static uint64_t count_versions(struct service_provider *sp,
                           uint64_t file_idx)
 {
     sqlite3 *handle = sp->db;
@@ -462,12 +465,12 @@ static int count_versions(struct service_provider *sp,
     sqlite3_stmt *st;
 
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, file_idx);
+    sqlite3_bind_int64(st, 1, file_idx);
 
     assert(sqlite3_step(st) == SQLITE_ROW);
 
     /* praying it works */
-    return sqlite3_column_int(st, 0);
+    return sqlite3_column_int64(st, 0);
 }
 
 static struct file_version *lookup_version(struct service_provider *sp,
@@ -484,15 +487,15 @@ static struct file_version *lookup_version(struct service_provider *sp,
     sqlite3_stmt *st;
 
     sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    sqlite3_bind_int(st, 1, file_idx);
-    sqlite3_bind_int(st, 2, version);
+    sqlite3_bind_int64(st, 1, file_idx);
+    sqlite3_bind_int64(st, 2, version);
 
     int rc = sqlite3_step(st);
     if(rc == SQLITE_ROW)
     {
         struct file_version *ver = calloc(1, sizeof(struct file_version));
 
-        ver->version = sqlite3_column_int(st, 1);
+        ver->version = sqlite3_column_int64(st, 1);
         memcpy(&ver->kf, sqlite3_column_blob(st, 2), sizeof(ver->kf));
         memcpy(&ver->encrypted_secret, sqlite3_column_blob(st, 3), sizeof(ver->encrypted_secret));
         memcpy(&ver->vr_cert, sqlite3_column_blob(st, 4), sizeof(ver->vr_cert));
@@ -680,7 +683,7 @@ static uint64_t find_empty_slot(struct service_provider *sp)
 
     if(rc == SQLITE_ROW)
     {
-        return sqlite3_column_int(st, 0);
+        return sqlite3_column_int64(st, 0);
     }
 
     return (uint64_t) -1;

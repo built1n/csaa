@@ -41,15 +41,15 @@ hash_t merkle_parent(hash_t u, hash_t v, int order);
  * function will additionally allocate an array of `logleaves' *
  * sizeof(int) with each element representing whether each
  * complementary node is a left or right child. */
-int *bintree_complement(int leafidx, int logleaves, int **orders);
-int *bintree_complement_ordersonly(int leafidx, int logleaves);
+uint64_t *bintree_complement(uint64_t leafidx, int logleaves, int **orders);
+int *bintree_complement_ordersonly(uint64_t leafidx, int logleaves);
 
 /* Return an array of indices of tree nodes that are dependent on a
  * given leaf node. Will be ordered from nearest relative to root. */
-int *bintree_ancestors(int leafidx, int logleaves);
+uint64_t *bintree_ancestors(uint64_t leafidx, int logleaves);
 
-int bintree_parent(int idx);
-int bintree_sibling(int idx);
+uint64_t bintree_parent(uint64_t idx);
+uint64_t bintree_sibling(uint64_t idx);
 
 uint64_t hash_to_u64(hash_t h);
 hash_t u64_to_hash(uint64_t n);

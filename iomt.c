@@ -28,7 +28,7 @@ static void reset_and_bind(const struct iomt *tree, sqlite3_stmt *st)
 }
 
 /* internal nodes only */
-hash_t iomt_getnode(const struct iomt *tree, int idx)
+hash_t iomt_getnode(const struct iomt *tree, uint64_t idx)
 {
     if(tree->in_memory)
         return tree->mem.mt_nodes[idx];
@@ -38,7 +38,7 @@ hash_t iomt_getnode(const struct iomt *tree, int idx)
 
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, idx);
+        sqlite3_bind_int64(st, 3, idx);
 
         int rc = sqlite3_step(st);
         if(rc == SQLITE_ROW)
@@ -55,7 +55,7 @@ hash_t iomt_getnode(const struct iomt *tree, int idx)
     }
 }
 
-void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
+void iomt_setnode(const struct iomt *tree, uint64_t idx, hash_t val)
 {
     if(tree->in_memory)
         tree->mem.mt_nodes[idx] = val;
@@ -70,7 +70,7 @@ void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
 
         sqlite3_bind_blob(st, 3, &val, sizeof(val), SQLITE_TRANSIENT);
 
-        sqlite3_bind_int(st, 4, idx);
+        sqlite3_bind_int64(st, 4, idx);
 
         int rc = sqlite3_step(st);
 
@@ -82,7 +82,7 @@ void iomt_setnode(const struct iomt *tree, int idx, hash_t val)
             st = tree->db.insertnode;
             reset_and_bind(tree, st);
 
-            sqlite3_bind_int(st, 3, idx);
+            sqlite3_bind_int64(st, 3, idx);
             sqlite3_bind_blob(st, 4, &val, sizeof(val), SQLITE_TRANSIENT);
 
             if(sqlite3_step(st) != SQLITE_DONE)
@@ -106,15 +106,15 @@ struct iomt_node iomt_getleaf(const struct iomt *tree, uint64_t leafidx)
         sqlite3_stmt *st = tree->db.getleaf;
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, leafidx);
+        sqlite3_bind_int64(st, 3, leafidx);
 
         int rc = sqlite3_step(st);
         if(rc == SQLITE_ROW)
         {
             struct iomt_node ret;
 
-            ret.idx = sqlite3_column_int(st, 0);
-            ret.next_idx = sqlite3_column_int(st, 1);
+            ret.idx = sqlite3_column_int64(st, 0);
+            ret.next_idx = sqlite3_column_int64(st, 1);
             memcpy(&ret.val, sqlite3_column_blob(st, 2), sizeof(ret.val));
 
             return ret;
@@ -141,11 +141,11 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
         sqlite3_stmt *st = tree->db.updateleaf;
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, val.idx);
-        sqlite3_bind_int(st, 4, val.next_idx);
+        sqlite3_bind_int64(st, 3, val.idx);
+        sqlite3_bind_int64(st, 4, val.next_idx);
         sqlite3_bind_blob(st, 5, &val.val, sizeof(val.val), SQLITE_TRANSIENT);
 
-        sqlite3_bind_int(st, 6, leafidx);
+        sqlite3_bind_int64(st, 6, leafidx);
 
         int rc = sqlite3_step(st);
 
@@ -157,9 +157,9 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
             st = tree->db.insertleaf;
             reset_and_bind(tree, st);
 
-            sqlite3_bind_int(st, 3, leafidx);
-            sqlite3_bind_int(st, 4, val.idx);
-            sqlite3_bind_int(st, 5, val.next_idx);
+            sqlite3_bind_int64(st, 3, leafidx);
+            sqlite3_bind_int64(st, 4, val.idx);
+            sqlite3_bind_int64(st, 5, val.next_idx);
             sqlite3_bind_blob(st, 6, &val.val, sizeof(val.val), SQLITE_TRANSIENT);
 
             if(sqlite3_step(st) != SQLITE_DONE)
@@ -172,9 +172,9 @@ void iomt_setleaf(struct iomt *tree, uint64_t leafidx, struct iomt_node val)
     }
 }
 
-hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders)
+hash_t *merkle_complement(const struct iomt *tree, uint64_t leafidx, int **orders)
 {
-    int *compidx = bintree_complement(leafidx, tree->mt_logleaves, orders);
+    uint64_t *compidx = bintree_complement(leafidx, tree->mt_logleaves, orders);
     hash_t *comp = lookup_nodes(tree, compidx, tree->mt_logleaves);
     free(compidx);
     return comp;
@@ -187,7 +187,7 @@ hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders)
  * be called once, namely when the service provider is created. */
 void iomt_fill(struct iomt *tree)
 {
-    for(int i = 0; i < tree->mt_leafcount; ++i)
+    for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
     {
         uint64_t mt_idx = (1 << tree->mt_logleaves) - 1 + i;
         iomt_setnode(tree, mt_idx, hash_node(iomt_getleaf(tree, i)));
@@ -197,7 +197,7 @@ void iomt_fill(struct iomt *tree)
     for(int i = tree->mt_logleaves - 1; i >= 0; --i)
     {
         uint64_t baseidx = (1 << i) - 1;
-        for(int j = 0; j < (1 << i); ++j)
+        for(uint64_t j = 0; j < (1 << i); ++j)
         {
             uint64_t mt_idx = baseidx + j;
             iomt_setnode(tree, mt_idx, merkle_parent(iomt_getnode(tree, 2 * mt_idx + 1),
@@ -215,7 +215,7 @@ void iomt_fill(struct iomt *tree)
  * to modify each function to take the array of all nodes in the tree
  * in addition to the complement indices, but this function will serve
  * as a shim in the meantime. */
-hash_t *lookup_nodes(const struct iomt *tree, const int *indices, int n)
+hash_t *lookup_nodes(const struct iomt *tree, const uint64_t *indices, int n)
 {
     hash_t *ret = calloc(n, sizeof(hash_t));
     for(int i = 0; i < n; ++i)
@@ -223,7 +223,7 @@ hash_t *lookup_nodes(const struct iomt *tree, const int *indices, int n)
     return ret;
 }
 
-void restore_nodes(struct iomt *tree, const int *indices, const hash_t *values, int n)
+void restore_nodes(struct iomt *tree, const uint64_t *indices, const hash_t *values, int n)
 {
     for(int i = 0; i < n; ++i)
         iomt_setnode(tree, indices[i], values[i]);
@@ -273,7 +273,7 @@ struct iomt_node iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t 
 {
     if(tree->in_memory)
     {
-        for(int i = 0; i < tree->mt_leafcount; ++i)
+        for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
             if(idx == iomt_getleaf(tree, i).idx)
             {
                 if(leafidx)
@@ -287,15 +287,15 @@ struct iomt_node iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t 
         sqlite3_stmt *st = tree->db.findleaf;
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, idx);
+        sqlite3_bind_int64(st, 3, idx);
 
         if(sqlite3_step(st) == SQLITE_ROW)
         {
             if(leafidx)
-                *leafidx = sqlite3_column_int(st, 0);
+                *leafidx = sqlite3_column_int64(st, 0);
             struct iomt_node ret;
             ret.idx = idx;
-            ret.next_idx = sqlite3_column_int(st, 1);
+            ret.next_idx = sqlite3_column_int64(st, 1);
             memcpy(&ret.val, sqlite3_column_blob(st, 2), sizeof(ret.val));
 
             return ret;
@@ -308,7 +308,7 @@ struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint6
 {
     if(tree->in_memory)
     {
-        for(int i = 0; i < tree->mt_leafcount; ++i)
+        for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
             if(encloses(iomt_getleaf(tree, i).idx, iomt_getleaf(tree, i).next_idx, idx))
             {
                 if(leafidx)
@@ -322,15 +322,15 @@ struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint6
         sqlite3_stmt *st = tree->db.findencloser;
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, idx);
+        sqlite3_bind_int64(st, 3, idx);
 
         if(sqlite3_step(st) == SQLITE_ROW)
         {
             if(leafidx)
-                *leafidx = sqlite3_column_int(st, 0);
+                *leafidx = sqlite3_column_int64(st, 0);
             struct iomt_node ret;
-            ret.idx = sqlite3_column_int(st, 1);
-            ret.next_idx = sqlite3_column_int(st, 2);
+            ret.idx = sqlite3_column_int64(st, 1);
+            ret.next_idx = sqlite3_column_int64(st, 2);
             memcpy(&ret.val, sqlite3_column_blob(st, 3), sizeof(ret.val));
 
             return ret;
@@ -343,7 +343,7 @@ struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t id
 {
     if(tree->in_memory)
     {
-        for(int i = 0; i < tree->mt_leafcount; ++i)
+        for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
         {
             if(iomt_getleaf(tree, i).idx == idx ||
                encloses(iomt_getleaf(tree, i).idx, iomt_getleaf(tree, i).next_idx, idx))
@@ -360,15 +360,15 @@ struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t id
         sqlite3_stmt *st = tree->db.findleaf_or_encloser;
         reset_and_bind(tree, st);
 
-        sqlite3_bind_int(st, 3, idx);
+        sqlite3_bind_int64(st, 3, idx);
 
         if(sqlite3_step(st) == SQLITE_ROW)
         {
             if(leafidx)
-                *leafidx = sqlite3_column_int(st, 0);
+                *leafidx = sqlite3_column_int64(st, 0);
             struct iomt_node ret;
-            ret.idx = sqlite3_column_int(st, 1);
-            ret.next_idx = sqlite3_column_int(st, 2);
+            ret.idx = sqlite3_column_int64(st, 1);
+            ret.next_idx = sqlite3_column_int64(st, 2);
             memcpy(&ret.val, sqlite3_column_blob(st, 3), sizeof(ret.val));
 
             return ret;
@@ -438,7 +438,7 @@ struct iomt *iomt_new(int logleaves)
 
     tree->in_memory = true;
 
-    tree->mt_leafcount = 1 << logleaves;
+    tree->mt_leafcount = 1UL << logleaves;
     tree->mt_logleaves = logleaves;
     tree->mem.mt_leaves = calloc(tree->mt_leafcount, sizeof(struct iomt_node));
 
@@ -500,7 +500,7 @@ struct iomt *iomt_new_from_db(void *db,
 
     tree->in_memory = false;
 
-    tree->mt_leafcount = 1 << logleaves;
+    tree->mt_leafcount = 1UL << logleaves;
     tree->mt_logleaves = logleaves;
 
     tree->db.db = db;
@@ -584,10 +584,10 @@ struct iomt *iomt_dup_in_db(void *db,
                                             oldtree->mt_logleaves);
 
     /* copy nodes, leaves (we do not recalculate the tree) */
-    for(int i = 0; i < newtree->mt_leafcount; ++i)
+    for(uint64_t i = 0; i < newtree->mt_leafcount; ++i)
         iomt_setleaf(newtree, i, iomt_getleaf(oldtree, i));
 
-    for(int i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
+    for(uint64_t i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
         iomt_setnode(newtree, i, iomt_getnode(oldtree, i));
 
     return newtree;
@@ -616,10 +616,10 @@ struct iomt *iomt_dup(const struct iomt *oldtree)
     else
     {
         /* copy nodes, leaves (we do not recalculate the tree) */
-        for(int i = 0; i < newtree->mt_leafcount; ++i)
+        for(uint64_t i = 0; i < newtree->mt_leafcount; ++i)
             iomt_setleaf(newtree, i, iomt_getleaf(oldtree, i));
 
-        for(int i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
+        for(uint64_t i = 0; i < 2 * newtree->mt_leafcount - 1; ++i)
             iomt_setnode(newtree, i, iomt_getnode(oldtree, i));
     }
 
@@ -659,7 +659,7 @@ void iomt_serialize(const struct iomt *tree,
             write_fn(userdata, tree->mem.mt_leaves, sizeof(struct iomt_node) * tree->mt_leafcount);
         else
         {
-            for(int i = 0; i < tree->mt_leafcount; ++i)
+            for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
             {
                 struct iomt_node node = iomt_getleaf(tree, i);
                 write_fn(userdata, &node, sizeof(node));
@@ -769,7 +769,7 @@ void iomt_dump(const struct iomt *tree)
 {
     if(tree)
     {
-        for(int i = 0; i < tree->mt_leafcount; ++i)
+        for(uint64_t i = 0; i < tree->mt_leafcount; ++i)
         {
             struct iomt_node node = iomt_getleaf(tree, i);
             printf("(%lu, %s, %lu)%s",

@@ -118,12 +118,12 @@ hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t
 
 /* Given a node's index, return the index of the parent in an array
  * representation of a binary tree. */
-int bintree_parent(int idx)
+uint64_t bintree_parent(uint64_t idx)
 {
     return (idx - ((idx & 1) ? 1 : 2)) / 2;
 }
 
-int bintree_sibling(int idx)
+uint64_t bintree_sibling(uint64_t idx)
 {
     return idx + ((idx & 1) ? 1 : -1);
 }
@@ -139,14 +139,14 @@ int bintree_sibling(int idx)
  * function will additionally allocate an array of `logleaves' *
  * sizeof(int) with each element representing whether each
  * complementary node is a left or right child. */
-int *bintree_complement(int leafidx, int logleaves, int **orders)
+uint64_t *bintree_complement(uint64_t leafidx, int logleaves, int **orders)
 {
-    int *comp = calloc(logleaves, sizeof(int));
+    uint64_t *comp = calloc(logleaves, sizeof(uint64_t));
     if(orders)
         *orders = calloc(logleaves, sizeof(int));
 
     /* true index of leaf */
-    int idx = (1 << logleaves) - 1 + leafidx;
+    uint64_t idx = (1 << logleaves) - 1 + leafidx;
 
     /* progress up the tree */
     for(int i = 0; i < logleaves; ++i)
@@ -165,11 +165,11 @@ int *bintree_complement(int leafidx, int logleaves, int **orders)
     return comp;
 }
 
-int *bintree_ancestors(int leafidx, int logleaves)
+uint64_t *bintree_ancestors(uint64_t leafidx, int logleaves)
 {
-    int *dep = calloc(logleaves, sizeof(int));
+    uint64_t *dep = calloc(logleaves, sizeof(uint64_t));
 
-    int idx = (1 << logleaves) - 1 + leafidx;
+    uint64_t idx = (1 << logleaves) - 1 + leafidx;
     for(int i = 0; i < logleaves; ++i)
     {
         idx = bintree_parent(idx);
@@ -180,7 +180,7 @@ int *bintree_ancestors(int leafidx, int logleaves)
 }
 
 /* Shim to get only the orders */
-int *bintree_complement_ordersonly(int leafidx, int logleaves)
+int *bintree_complement_ordersonly(uint64_t leafidx, int logleaves)
 {
     int *orders;
     free(bintree_complement(leafidx, logleaves, &orders));
@@ -474,16 +474,16 @@ void crypto_test(void)
 {
 #if 1
     int *orders;
-    int *comp = bintree_complement(6, 4, &orders);
-    int correct[] = { 22, 9, 3, 2 };
+    uint64_t *comp = bintree_complement(6, 4, &orders);
+    uint64_t correct[] = { 22, 9, 3, 2 };
     int correct_orders[] = { 1, 0, 0, 1 };
-    check("Complement calculation", !memcmp(comp, correct, 4 * sizeof(int)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
+    check("Complement calculation", !memcmp(comp, correct, 4 * sizeof(uint64_t)) && !memcmp(orders, correct_orders, 4 * sizeof(int)));
     free(orders);
     free(comp);
 
-    int *dep = bintree_ancestors(6, 4);
-    int correct_dep[] = { 10, 4, 1, 0 };
-    check("Dependency calculation", !memcmp(dep, correct_dep, 4 * sizeof(int)));
+    uint64_t *dep = bintree_ancestors(6, 4);
+    uint64_t correct_dep[] = { 10, 4, 1, 0 };
+    check("Dependency calculation", !memcmp(dep, correct_dep, 4 * sizeof(uint64_t)));
     free(dep);
 
     {

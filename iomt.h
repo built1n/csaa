@@ -55,10 +55,10 @@ struct iomt {
 
 hash_t hash_node(struct iomt_node node);
 
-hash_t *lookup_nodes(const struct iomt *tree, const int *indices, int n);
-void restore_nodes(struct iomt *tree, const int *indices, const hash_t *values, int n);
+hash_t *lookup_nodes(const struct iomt *tree, const uint64_t *indices, int n);
+void restore_nodes(struct iomt *tree, const uint64_t *indices, const hash_t *values, int n);
 
-hash_t *merkle_complement(const struct iomt *tree, int leafidx, int **orders);
+hash_t *merkle_complement(const struct iomt *tree, uint64_t leafidx, int **orders);
 
 /* This function is prefixed merkle_ because it does not know about
  * any IOMT-specific properties (though it is still passed an iomt
@@ -110,8 +110,8 @@ void iomt_dump(const struct iomt *tree);
 
 hash_t iomt_getroot(const struct iomt *tree);
 
-hash_t iomt_getnode(const struct iomt *tree, int idx);
-void iomt_setnode(const struct iomt *tree, int idx, hash_t val);
+hash_t iomt_getnode(const struct iomt *tree, uint64_t idx);
+void iomt_setnode(const struct iomt *tree, uint64_t idx, hash_t val);
 
 struct iomt_node iomt_getleaf(const struct iomt *tree, uint64_t leafidx);
 

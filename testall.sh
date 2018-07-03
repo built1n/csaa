@@ -7,7 +7,7 @@ fi
 echo "Initializing..."
 ./server $1 csaa.db --overwrite > /dev/null &
 pid=$!
-sleep 5
+sleep 2
 time ./testcreate.sh ./client
 time ./testmodify.sh ./client
 time ./testretrieve.sh ./client
