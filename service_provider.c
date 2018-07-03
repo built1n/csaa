@@ -60,6 +60,11 @@ struct service_provider {
 
     const char *data_dir;
 
+    /* count of number of placeholders (should never be more than
+     * 1) */
+    int n_placeholders;
+    uint64_t next_fileidx;
+
     void *db; /* sqlite3 handle */
     struct iomt *iomt; /* backed by database */
 };
@@ -261,7 +266,11 @@ struct service_provider *sp_new(const void *key, size_t keylen,
     if(iomt_init)
     {
         /* create IOMT in memory first, then commit to DB */
-        sp->iomt = iomt_new(logleaves);
+        sp->iomt = iomt_new_from_db(sp->db,
+                                    "FileNodes", "FileLeaves",
+                                    NULL, 0,
+                                    NULL, 0,
+                                    logleaves);
 
         printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
@@ -276,56 +285,8 @@ struct service_provider *sp_new(const void *key, size_t keylen,
                               0,
                               1, 1, hash_null);
 
-        for(int i = 1; i < sp->iomt->mt_leafcount; ++i)
-        {
-            /* generate EQ certificate */
-            hash_t hmac;
-            struct tm_cert eq = cert_eq(sp,
-                                        iomt_getleaf(sp->iomt, i - 1),
-                                        i - 1,
-                                        i, i + 1,
-                                        &hmac);
-            assert(eq.type == EQ);
-
-            /* update previous leaf's index */
-            iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
-
-            /* next_idx is set to 1 to keep everything circularly linked;
-             * in the next iteration it will be updated to point to the
-             * next node, if any */
-            iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
-
-            assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-            //printf("%d\n", i);
-        }
-
-        /* now transfer to database */
-        printf("IOMT initialized in memory, transferring to DB...\n");
-
-        clock_t point1 = clock();
-
-        begin_transaction(sp->db);
-
-        /* we must do it this way because cert_eq expects sp->iomt to be
-         * the working tree */
-        struct iomt *old = sp->iomt;
-
-        sp->iomt = iomt_dup_in_db(sp->db,
-                                  "FileNodes", "FileLeaves",
-                                  NULL, 0,
-                                  NULL, 0,
-                                  old);
-
-        commit_transaction(sp->db);
-
-        iomt_free(old);
-
-        clock_t stop = clock();
-
-        printf("sp_init(): logleaves=%d, time=%.3fsec, overall_rate=%.3f/sec, db_time=%.3fsec\n",
-               logleaves, (double)(stop - start) / CLOCKS_PER_SEC,
-               (double)(1ULL << logleaves) * CLOCKS_PER_SEC / ( stop - start ),
-               (double)(stop - point1) / CLOCKS_PER_SEC);
+        sp->n_placeholders = 1;
+        sp->next_fileidx = 1;
     }
     else
     {
@@ -334,6 +295,8 @@ struct service_provider *sp_new(const void *key, size_t keylen,
                                     NULL, 0,
                                     NULL, 0,
                                     logleaves);
+
+        /* TODO: set placeholder count, file index */
 
         warn("resuming from previous database; module will fail");
 
@@ -729,13 +692,49 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                 void *userdata,
                                 hash_t *ack_hmac)
 {
-    uint64_t i = find_empty_slot(sp);
+    /* allocate a node in the IOMT */
+    uint64_t i = (uint64_t) - 1;
 
-    if(i == (uint64_t) -1)
+    if(sp->n_placeholders > 0)
     {
-        /* TODO: grow tree? */
-        printf("Out of slots!\n");
-        return req_null;
+        i = find_empty_slot(sp);
+        if(i == (uint64_t) -1)
+        {
+            assert(false); /* shouldn't happen */
+        }
+    }
+    else
+    {
+        /* we must insert a placeholder node; first find the index of
+         * the leaf that loops around to 1 */
+        i = sp->next_fileidx - 1;
+        if(i >= sp->iomt->mt_leafcount)
+        {
+            /* TODO: grow tree */
+            printf("Tree full!\n");
+            return req_null;
+        }
+
+        /* generate EQ certificate */
+        hash_t hmac;
+        struct tm_cert eq = cert_eq(sp,
+                                    iomt_getleaf(sp->iomt, i - 1),
+                                    i - 1,
+                                    i, i + 1,
+                                    &hmac);
+        assert(eq.type == EQ);
+
+        /* update previous leaf's index */
+        iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
+
+        /* next_idx is set to 1 to keep everything circularly linked;
+         * in the next iteration it will be updated to point to the
+         * next node, if any */
+        iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
+
+        assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+
+        sp->n_placeholders++;
     }
 
     int *file_orders;
@@ -743,9 +742,11 @@ struct tm_request sp_createfile(struct service_provider *sp,
 
     struct iomt *acl = iomt_new_from_db(sp->db,
                                         "ACLNodes", "ACLLeaves",
-                                        "FileIdx", iomt_getleaf(sp->iomt, i).idx,
+                                        "FileIdx", sp->next_fileidx,
                                         NULL, 0,
                                         ACL_LOGLEAVES);
+
+    sp->next_fileidx++;
 
     iomt_update_leaf_full(acl,
                            0,
@@ -768,6 +769,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         NULL, NULL,
                                         NULL, 0,
                                         acl);
+    sp->n_placeholders--;
 
     free(file_comp);
     free(file_orders);
