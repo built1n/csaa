@@ -25,7 +25,7 @@ static const struct iomt_node node_null = { 0, 0, { { 0 } } };
  * and so on.
  */
 struct iomt {
-    int mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
+    uint64_t mt_leafcount, mt_logleaves; /* mt_logleaves must equal 2^mt_leafcount */
 
     bool in_memory;
 

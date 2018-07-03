@@ -225,7 +225,6 @@ bool parse_args(int argc, char *argv[])
             if((1 << logleaves) != n / 2)
                 logleaves++;
 
-            printf("ACL logleaves = %d, count = %d, mt_leafcount = %d\n", logleaves, n, 1 << logleaves);
             new_acl = iomt_new(logleaves);
             /* now produce IOMT */
             uint64_t first_idx = acl_tuples[0];
@@ -731,9 +730,6 @@ bool server_request(const char *sockpath,
 }
 
 int main(int argc, char *argv[]) {
-    char buf[100];
-    int fd,rc;
-
     if(!parse_args(argc, argv))
     {
         printf("%s\n", parse_args_fail);

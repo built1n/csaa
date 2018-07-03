@@ -446,9 +446,9 @@ static void sp_handle_client(struct service_provider *sp, int cl)
 
         break;
     }
-    case USERREQ_NONE:
+    default:
     {
-        printf("null request\n");
+        printf("bad request\n");
         exit(1);
     }
     }

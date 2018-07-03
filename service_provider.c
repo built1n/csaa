@@ -274,8 +274,6 @@ struct service_provider *sp_new(const void *key, size_t keylen,
 
         printf("Initializing IOMT with %llu nodes.\n", 1ULL << logleaves);
 
-        clock_t start = clock();
-
         /* The trusted module initializes itself with a single placeholder
          * node (1,0,1). We first update our list of IOMT leaves. Then we
          * insert our desired number of nodes by using EQ certificates to
@@ -441,9 +439,9 @@ static void insert_version(struct service_provider *sp,
     sqlite3_bind_blob(st, 5, &ver->vr_cert, sizeof(ver->vr_cert), SQLITE_TRANSIENT);
     sqlite3_bind_blob(st, 6, &ver->vr_hmac, sizeof(ver->vr_hmac), SQLITE_TRANSIENT);
 
-    sqlite3_bind_int(st, 7, ver->buildcode ? ver->buildcode->mt_logleaves : -1);
+    sqlite3_bind_int64(st, 7, ver->buildcode ? ver->buildcode->mt_logleaves : -1);
 
-    sqlite3_bind_int(st, 8, ver->composefile ? ver->composefile->mt_logleaves : -1);
+    sqlite3_bind_int64(st, 8, ver->composefile ? ver->composefile->mt_logleaves : -1);
 
     int rc = sqlite3_step(st);
     if(rc != SQLITE_DONE)
@@ -500,18 +498,20 @@ static struct file_version *lookup_version(struct service_provider *sp,
         memcpy(&ver->vr_cert, sqlite3_column_blob(st, 4), sizeof(ver->vr_cert));
         memcpy(&ver->vr_hmac, sqlite3_column_blob(st, 5), sizeof(ver->vr_hmac));
 
-        int bc_logleaves = sqlite3_column_int(st, 6);
-        int cf_logleaves = sqlite3_column_int(st, 7);
-        ver->buildcode = iomt_new_from_db(sp->db,
-                                          "BCNodes", "BCLeaves",
-                                          "FileIdx", file_idx,
-                                          "Version", version,
-                                          bc_logleaves);
-        ver->composefile = iomt_new_from_db(sp->db,
-                                            "CFNodes", "CFLeaves",
-                                            "FileIdx", file_idx,
-                                            "Version", version,
-                                            cf_logleaves);
+        int64_t bc_logleaves = sqlite3_column_int64(st, 6);
+        int64_t cf_logleaves = sqlite3_column_int64(st, 7);
+
+        ver->buildcode = bc_logleaves >= 0 ? iomt_new_from_db(sp->db,
+                                                              "BCNodes", "BCLeaves",
+                                                              "FileIdx", file_idx,
+                                                              "Version", version,
+                                                              bc_logleaves) : NULL;
+
+        ver->composefile = cf_logleaves >= 0 ? iomt_new_from_db(sp->db,
+                                                                "CFNodes", "CFLeaves",
+                                                                "FileIdx", file_idx,
+                                                                "Version", version,
+                                                                cf_logleaves) : NULL;
         return ver;
     }
     return NULL;
@@ -849,7 +849,6 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                 hash_t *ack_hmac)
 {
     /* modification */
-    printf("Modify file %d\n", file_idx);
     struct file_record *rec = lookup_record(sp, file_idx);
     if(!rec)
     {

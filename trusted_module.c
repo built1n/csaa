@@ -990,9 +990,8 @@ void tm_test(void)
         hash_t node_new = sha256("b", 1);
         hash_t comp[] = { sha256("b", 1) };
         int orders[] = { 1 }; /* complementary node is right child */
-        hash_t root_1, root_2, root_3;
+        hash_t root_1, root_3;
         root_1 = merkle_compute(node, comp, orders, 1);
-        root_2 = merkle_compute(node_new, comp, orders, 1);
 
         hash_t hmac;
         struct tm_cert nu = tm_cert_node_update(tm, node, node_new, comp, orders, 1, &hmac);

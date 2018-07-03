@@ -236,7 +236,6 @@ bool exec_request(int fd, const struct user_request *req,
     }
     case RETRIEVE_INFO:
     {
-        hash_t hmac;
         struct version_info verinfo;
         recv(fd, &verinfo, sizeof(verinfo), MSG_WAITALL);
         *verinfo_out = verinfo;
@@ -276,12 +275,12 @@ struct version_info request_verinfo(int fd, uint64_t user_id,
 
     struct version_info verinfo;
 
-    bool rc = exec_request(fd, &req,
-                           NULL, 0,
-                           &verinfo,
-                           NULL,
-                           NULL,
-                           NULL);
+    exec_request(fd, &req,
+                 NULL, 0,
+                 &verinfo,
+                 NULL,
+                 NULL,
+                 NULL);
 
     return verinfo;
 }
@@ -398,9 +397,6 @@ bool server_request(const char *sockpath,
 }
 
 int main(int argc, char *argv[]) {
-    char buf[100];
-    int fd,rc;
-
     if(!parse_args(argc, argv))
     {
         printf("%s\n", parse_args_fail);
