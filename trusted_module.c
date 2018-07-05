@@ -20,7 +20,7 @@
 #include "trusted_module.h"
 
 struct user_key {
-    const void *key;
+    void *key; /* dynamic */
     size_t len;
 };
 
@@ -28,7 +28,7 @@ struct trusted_module {
     hash_t root; /* root of IOMT */
 
     /* shared secret with user */
-    struct user_key *user_keys;
+    struct user_key *user_keys; /* dynamic */
     size_t n_users;
 
     /* secret for signing self-certificates */
@@ -56,8 +56,9 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
 
     tm->user_keys = calloc(1, sizeof(*tm->user_keys));
     tm->n_users = 1;
-    tm->user_keys[0].key = key;
     tm->user_keys[0].len = keylen;
+    tm->user_keys[0].key = malloc(keylen);
+    memcpy(tm->user_keys[0].key, key, keylen);
 
     /* initialize with a node of (1, 0, 1) in the tree */
     struct iomt_node boot = (struct iomt_node) { 1, 1, hash_null };
@@ -69,8 +70,52 @@ struct trusted_module *tm_new(const void *key, size_t keylen)
 
 void tm_free(struct trusted_module *tm)
 {
+    for(int i = 0; i < tm->n_users; ++i)
+        free(tm->user_keys[i].key);
     free(tm->user_keys);
     free(tm);
+}
+
+/* hack: no authentication at all */
+void tm_savestate(const struct trusted_module *tm, const char *filename)
+{
+    FILE *f = fopen(filename, "w");
+
+    fwrite(tm->secret, sizeof(tm->secret), 1, f);
+    fwrite(&tm->n_users, sizeof(tm->n_users), 1, f);
+    for(int i = 0; i < tm->n_users; ++i)
+    {
+        fwrite(&tm->user_keys[i].len, sizeof(tm->user_keys[i].len), 1, f);
+        fwrite(tm->user_keys[i].key, tm->user_keys[i].len, 1, f);
+    }
+
+    fwrite(&tm->root, sizeof(tm->root), 1, f);
+}
+
+struct trusted_module *tm_new_from_savedstate(const char *filename)
+{
+    FILE *f = fopen(filename, "r");
+
+    if(!f)
+        return NULL;
+
+    struct trusted_module *tm = calloc(1, sizeof(struct trusted_module));
+
+    fread(tm->secret, sizeof(tm->secret), 1, f);
+
+    fread(&tm->n_users, sizeof(tm->n_users), 1, f);
+    tm->user_keys = calloc(1, sizeof(*tm->user_keys) * tm->n_users);
+
+    for(int i = 0; i < tm->n_users; ++i)
+    {
+        fread(&tm->user_keys[i].len, sizeof(tm->user_keys[i].len), 1, f);
+        tm->user_keys[i].key = malloc(tm->user_keys[i].len);
+        fread(tm->user_keys[i].key, tm->user_keys[i].len, 1, f);
+    }
+
+    fread(&tm->root, sizeof(tm->root), 1, f);
+
+    return tm;
 }
 
 static hash_t cert_sign(const struct trusted_module *tm, const struct tm_cert *cert)

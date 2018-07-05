@@ -29,6 +29,9 @@ void cleanup(void)
 {
     if(cleanup_socket)
         unlink(cleanup_socket);
+#ifndef DUMMY
+    sp_save();
+#endif
 }
 
 void signal_handler(int sig)

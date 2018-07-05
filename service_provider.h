@@ -135,6 +135,8 @@ void sp_test(void);
 
 #if defined(DUMMY) || !defined(CLIENT)
 int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite);
+
+void sp_save(void);
 #endif
 
 #endif

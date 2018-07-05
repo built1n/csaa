@@ -67,6 +67,9 @@ struct service_provider {
 
     void *db; /* sqlite3 handle */
     struct iomt *iomt; /* backed by database */
+
+    sqlite3_stmt *lookup_record, *insert_record, *update_record,
+        *insert_version, *count_versions, *lookup_version, *find_empty;
 };
 
 /* Generate an EQ certificate for inserting a placeholder with index
@@ -208,6 +211,11 @@ int count_rows(void *db, const char *table)
     return rows;
 }
 
+void db_free(void *handle)
+{
+    sqlite3_close(handle);
+}
+
 void *db_init(const char *filename, bool overwrite, bool *need_init)
 {
     sqlite3 *db;
@@ -222,8 +230,7 @@ void *db_init(const char *filename, bool overwrite, bool *need_init)
         extern unsigned char sqlinit_txt[];
 
         /* create tables */
-        char *msg;
-        assert(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, &msg) == SQLITE_OK);
+        assert(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, NULL) == SQLITE_OK);
 
         *need_init = true;
     }
@@ -245,6 +252,46 @@ void commit_transaction(void *db)
     sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
 }
 
+int count_placeholders(void *db)
+{
+    sqlite3 *handle = db;
+    const char *sql = "SELECT COUNT(*) FROM FileLeaves WHERE Val = ?1;";
+
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+
+    sqlite3_bind_blob(st, 1, &hash_null, sizeof(hash_null), SQLITE_STATIC);
+
+    assert(sqlite3_step(st) == SQLITE_ROW);
+
+    int count = sqlite3_column_int(st, 0);
+
+    sqlite3_finalize(st);
+
+    printf("Counted %d placeholders\n", count);
+
+    return count;
+}
+
+uint64_t max_fileindex(void *db)
+{
+    sqlite3 *handle = db;
+    const char *sql = "SELECT MAX(Idx) FROM FileRecords;";
+
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+
+    uint64_t max = 0;
+    if(sqlite3_step(st) == SQLITE_ROW)
+        max = sqlite3_column_int64(st, 0);
+
+    sqlite3_finalize(st);
+
+    printf("maximum index is %lu\n", max);
+
+    return max;
+}
+
 /* leaf count will be 2^logleaves */
 /* will use old DB contents unless overwrite_db is true */
 struct service_provider *sp_new(const void *key, size_t keylen,
@@ -262,12 +309,12 @@ struct service_provider *sp_new(const void *key, size_t keylen,
     bool iomt_init = true;
     sp->db = db_init(dbpath, overwrite_db, &iomt_init);
 
-    sp->tm = tm_new(key, keylen);
-
     sp->data_dir = data_dir;
 
     if(iomt_init)
     {
+        sp->tm = tm_new(key, keylen);
+
         /* create IOMT in memory first, then commit to DB */
         sp->iomt = iomt_new_from_db(sp->db,
                                     "FileNodes", "FileLeaves",
@@ -297,14 +344,24 @@ struct service_provider *sp_new(const void *key, size_t keylen,
                                     NULL, 0,
                                     logleaves);
 
-        /* TODO: set placeholder count, file index */
+        sp->tm = tm_new_from_savedstate("module_state");
+        if(!sp->tm)
+        {
+            warn("failed to load module state; creating fresh state (will probably fail)");
+            sp->tm = tm_new(key, keylen);
+        }
 
-        warn("resuming from previous database; module will fail");
+        sp->n_placeholders = count_placeholders(sp->db);
+        sp->next_fileidx = max_fileindex(sp->db) + 1;
 
+        printf("Resuming from previous state...\n");
+
+#if 0
         int leaves = count_rows(sp->db, "FileLeaves");
         if(leaves != (1ULL << logleaves))
             warn("logleaves value is inconsistent with leaf count in IOMT! (have %d, expect %d)",
                  leaves, 1 << logleaves);
+#endif
     }
 
     return sp;
@@ -335,6 +392,7 @@ void sp_free(struct service_provider *sp)
     {
         tm_free(sp->tm);
         iomt_free(sp->iomt);
+        db_free(sp->db);
         free(sp);
     }
 }
@@ -665,17 +723,12 @@ struct tm_cert sp_request(struct service_provider *sp,
 /* returns a leaf idx (not a file idx!) */
 static uint64_t find_empty_slot(struct service_provider *sp)
 {
-    static sqlite3_stmt *st = NULL;
+    sqlite3_stmt *st;
 
     sqlite3 *handle = sp->db;
 
-    if(!st)
-    {
-        const char *sql = "SELECT LeafIdx FROM FileLeaves WHERE Val = ?1 LIMIT 1;";
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
-    }
-    else
-        sqlite3_reset(st);
+    const char *sql = "SELECT LeafIdx FROM FileLeaves WHERE Val = ?1 LIMIT 1;";
+    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
 
     sqlite3_bind_blob(st, 1, &hash_null, sizeof(hash_null), SQLITE_STATIC);
 
@@ -774,6 +827,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         acl);
     sp->n_placeholders--;
 
+    iomt_free(acl);
     free(file_comp);
     free(file_orders);
 
@@ -818,6 +872,8 @@ struct tm_request sp_modifyacl(struct service_provider *sp,
                                           acl_node,
                                           acl_comp, acl_orders, rec->acl->mt_logleaves,
                                           iomt_getroot(new_acl));
+
+    free_record(rec);
 
     free(file_comp);
     free(file_orders);
@@ -893,6 +949,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     free(acl_comp);
     free(file_orders);
     free(acl_orders);
+
+    free_record(rec);
 
     hash_t req_hmac = sign_request(userdata, &req);
 
@@ -1015,6 +1073,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                                  &rec->fr_cert, rec->fr_hmac,
                                                  ver ? &ver->vr_cert : NULL, ver ? ver->vr_hmac : hash_null,
                                                  hmac);
+    free_record(rec);
     free_version(ver);
 
     return ret;
@@ -1054,6 +1113,7 @@ void *sp_retrieve_file(struct service_provider *sp,
 
     if(!ver)
     {
+        free_record(rec);
         *len = 0;
         return NULL;
     }
@@ -1091,6 +1151,7 @@ void *sp_retrieve_file(struct service_provider *sp,
     if(composefile)
         *composefile = iomt_dup(ver->composefile);
 
+    free_record(rec);
     free_version(ver);
 
     return ret;
@@ -1143,6 +1204,9 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                      user_req.modify_acl.file_idx,
                      acl,
                      &ack_hmac);
+
+        iomt_free(acl);
+
         if(write(cl, &ack_hmac, sizeof(ack_hmac)) != sizeof(ack_hmac))
             return;
         break;
@@ -1173,6 +1237,9 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         {
             printf("Failed: %s\n", tm_geterror());
         }
+
+        free(filebuf);
+
         iomt_free(buildcode);
         iomt_free(composefile);
         write(cl, &ack_hmac, sizeof(ack_hmac));
@@ -1227,7 +1294,10 @@ static void sp_handle_client(struct service_provider *sp, int cl)
 
         write(cl, &len, sizeof(len));
         if(contents)
+        {
             write(cl, contents, len);
+            free(contents);
+        }
 
         break;
     }
@@ -1236,6 +1306,18 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         printf("null request\n");
         exit(1);
     }
+    }
+}
+
+/* will be called by main.c's signal handler to save the module's
+ * state */
+static struct service_provider *global_sp = NULL;
+
+void sp_save(void)
+{
+    if(global_sp)
+    {
+        tm_savestate(global_sp->tm, "module_state");
     }
 }
 
@@ -1252,6 +1334,7 @@ int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
     signal(SIGPIPE, SIG_IGN);
 
     struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath, overwrite);
+    global_sp = sp;
 
     while(1)
     {

@@ -104,7 +104,10 @@ static const struct version_info verinfo_null = { 0 };
 
 /* creates 1 user with given shared secret */
 struct trusted_module *tm_new(const void *key, size_t keylen);
+struct trusted_module *tm_new_from_savedstate(const char *filename);
+void tm_savestate(const struct trusted_module *tm, const char *filename);
 void tm_free(struct trusted_module *tm);
+
 void tm_test(void);
 
 /* certificate generation routines */
