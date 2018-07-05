@@ -7,12 +7,12 @@ fi
 echo "Initializing..."
 ./server $1 csaa.db --overwrite > /dev/null &
 pid=$!
-sleep 2
-time ./testcreate.sh ./client
-time ./testmodify.sh ./client
-time ./testretrieve.sh ./client
-time ./testmodifyenc.sh ./client
+sleep 1
+/usr/bin/time -v ./testcreate.sh ./client
+/usr/bin/time -v ./testmodify.sh ./client
+/usr/bin/time -v ./testretrieve.sh ./client
+/usr/bin/time -v ./testmodifyenc.sh ./client
 
 echo "Encrypted retrieve: "
-time ./testretrieve.sh ./client
+/usr/bin/time -v ./testretrieve.sh ./client
 kill -SIGINT $!
