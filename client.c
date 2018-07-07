@@ -332,6 +332,8 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req,
         }
         break;
     }
+    /* TODO: check indices to prevent replay of old request and
+     * response (will require file info first) */
     case MODIFY_FILE:
     {
         if(tmr.type != FILE_UPDATE     ||
@@ -367,7 +369,7 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
     if(recv(fd, &hmac, sizeof(hmac), MSG_WAITALL) != sizeof(hmac))
         return false;
 
-    return ack_verify(tmr, userkey, strlen(userkey), hmac);
+    return verify_ack(tmr, userkey, strlen(userkey), hmac);
 }
 
 /* In case of modifcation or file creation, returns true on successful
@@ -445,7 +447,7 @@ bool exec_request(int fd, const struct user_request *req,
         recv(fd, &verinfo, sizeof(verinfo), MSG_WAITALL);
         recv(fd, &hmac, sizeof(hmac), MSG_WAITALL);
 
-        if(hash_equals(hmac, hmac_sha256(&verinfo, sizeof(verinfo), user_key, keylen)))
+        if(verify_verinfo(&verinfo, user_key, keylen, req->retrieve.nonce, hmac))
         {
             if(verinfo.idx != 0)
             {
@@ -640,6 +642,11 @@ bool server_request(const char *sockpath,
                                                                 user_key, user_id);
             }
         }
+    }
+    else if(req.type == RETRIEVE_INFO)
+    {
+        /* RETRIEVE_FILE does not need a nonce */
+        req.retrieve.nonce = generate_nonce();
     }
 
     struct version_info verinfo;

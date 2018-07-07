@@ -57,6 +57,10 @@ struct user_request {
         struct {
             /* same structure for retrieve file and retrieve info */
             uint64_t file_idx, version;
+
+            /* used only for RETRIEVE_INFO */
+            hash_t nonce;
+
             /* service will respond with either version_info struct,
              * the serialized ACL, and an HMAC, or file contents and
              * key (which the client can verify themselves) */
@@ -116,6 +120,7 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 struct version_info sp_fileinfo(struct service_provider *sp,
                                 uint64_t user_id, uint64_t file_idx,
                                 uint64_t version,
+                                hash_t nonce,
                                 hash_t *hmac,
                                 struct iomt **acl_out);
 

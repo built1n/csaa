@@ -447,7 +447,7 @@ static bool req_verify(const struct trusted_module *tm, const struct tm_request 
 
 static hash_t req_ack(const struct trusted_module *tm, const struct tm_request *req)
 {
-    return ack_sign(req,
+    return sign_ack(req,
                     1,
                     tm->user_keys[req->user_id - 1].key,
                     tm->user_keys[req->user_id - 1].len);
@@ -841,13 +841,13 @@ hash_t tm_retrieve_secret(const struct trusted_module *tm,
     return hash_xor(secret, pad);
 }
 
-static hash_t sign_verinfo(const struct trusted_module *tm,
-                           const struct version_info *ver,
-                           uint64_t user_id)
+static hash_t tm_sign_verinfo(const struct trusted_module *tm,
+                              const struct version_info *ver,
+                              uint64_t user_id)
 {
-    return hmac_sha256(ver, sizeof(*ver),
-                       tm->user_keys[user_id - 1].key,
-                       tm->user_keys[user_id - 1].len);
+    return sign_verinfo(ver,
+                        tm->user_keys[user_id - 1].key,
+                        tm->user_keys[user_id - 1].len);
 }
 
 /* Verify the integrity of file information passed in the four
@@ -867,10 +867,9 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
                                        const struct tm_cert *rv2, hash_t rv2_hmac,
                                        const struct tm_cert *fr, hash_t fr_hmac,
                                        const struct tm_cert *vr, hash_t vr_hmac,
+                                       hash_t nonce,
                                        hash_t *response_hmac)
 {
-    struct version_info verinfo = verinfo_null;
-
     /* No authenticated response if the parameters are incorrect or
      * improperly signed; it is the service provider's responsibility
      * to make sure these are correct, because if they are not, the
@@ -903,8 +902,11 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
     /* File does not exist; issue authenticated denial. */
     if(is_zero(rv1->rv.val))
     {
+        struct version_info verinfo = verinfo_null;
+        verinfo.nonce = nonce;
+
         verinfo.idx = rv1->rv.idx;
-        *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+        *response_hmac = tm_sign_verinfo(tm, &verinfo, user_id);
         return verinfo;
     }
 
@@ -967,8 +969,12 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
         /* insufficient access level; produce an authenticated denial
          * (which is indistinguishable from the response when a file
          * does not exist) */
+
+        struct version_info verinfo = verinfo_null;
+        verinfo.nonce = nonce;
+
         verinfo.idx = fr->fr.idx;
-        *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+        *response_hmac = tm_sign_verinfo(tm, &verinfo, user_id);
 
         return verinfo;
     }
@@ -979,6 +985,9 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
         {
             /* File has been created, but has no contents (and hence
              * no versions). We issue a response to this effect. */
+            struct version_info verinfo;
+            verinfo.nonce = nonce;
+
             verinfo.idx = fr->fr.idx;
             verinfo.counter = fr->fr.counter;
             verinfo.max_version = fr->fr.version;
@@ -986,7 +995,7 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
             verinfo.current_acl = fr->fr.acl;
             verinfo.lambda = hash_null;
 
-            *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+            *response_hmac = tm_sign_verinfo(tm, &verinfo, user_id);
             return verinfo;
         }
         tm_seterror("null VR even though maxversion > 0");
@@ -1013,6 +1022,9 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
 
     /* We have verified that this file version exists and can
      * authenticate its record. */
+    struct version_info verinfo;
+    verinfo.nonce = nonce;
+
     verinfo.idx = fr->fr.idx;
     verinfo.counter = fr->fr.counter;
     verinfo.max_version = fr->fr.version;
@@ -1020,7 +1032,7 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
     verinfo.current_acl = fr->fr.acl;
     verinfo.lambda = vr->vr.hash;
 
-    *response_hmac = sign_verinfo(tm, &verinfo, user_id);
+    *response_hmac = tm_sign_verinfo(tm, &verinfo, user_id);
     return verinfo;
 }
 

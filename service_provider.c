@@ -985,67 +985,11 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                 uint64_t user_id,
                                 uint64_t file_idx,
                                 uint64_t version,
+                                hash_t nonce,
                                 hash_t *hmac,
                                 struct iomt **acl_out)
 {
     struct file_record *rec = lookup_record(sp, file_idx);
-
-    /* Produce an authenticated denial proving that no file exists
-     * with the given index. */
-    if(!rec)
-    {
-        /* In theory, we would have to perform a linear search now to
-         * either find a placeholder node for this file index, or an
-         * enclosing node, both of which would prove that no file with
-         * the given index exists. However, we can cheat since we know
-         * that our IOMT is initialized with all the node indices
-         * falling densely into the range [1,2^logleaves]. If the
-         * index falls into this range, we can generate a RV
-         * certificate indicating that it has a zero counter value
-         * (and hence no associated file), or if it falls outside this
-         * range, by generating an RV certificate indicating the
-         * nonexistence of this node index. */
-        struct tm_cert rv1;
-        hash_t rv1_hmac;
-
-        if(1 <= file_idx && file_idx <= sp->iomt->mt_leafcount)
-        {
-            int *orders;
-            hash_t *comp = merkle_complement(sp->iomt, file_idx - 1, &orders);
-
-            /* Placeholder exists. */
-            rv1 = cert_rv(sp->tm,
-                          iomt_getleaf(sp->iomt, file_idx - 1),
-                          comp, orders, sp->iomt->mt_logleaves,
-                          &rv1_hmac,
-                          0, NULL, NULL);
-            free(comp);
-            free(orders);
-        }
-        else
-        {
-            /* Use last node as encloser */
-            int *orders;
-            hash_t *comp = merkle_complement(sp->iomt, sp->iomt->mt_leafcount - 1, &orders);
-
-            cert_rv(sp->tm,
-                    iomt_getleaf(sp->iomt, sp->iomt->mt_leafcount - 1),
-                    comp, orders, sp->iomt->mt_logleaves,
-                    NULL,
-                    file_idx, &rv1, &rv1_hmac);
-
-            free(comp);
-            free(orders);
-        }
-
-        return tm_verify_fileinfo(sp->tm,
-                                  user_id,
-                                  &rv1, rv1_hmac,
-                                  NULL, hash_null,
-                                  NULL, hash_null,
-                                  NULL, hash_null,
-                                  hmac);
-    }
 
     /* RV1 indicates counter */
     hash_t rv1_hmac;
@@ -1053,6 +997,20 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                         sp->iomt,
                                         file_idx,
                                         &rv1_hmac);
+
+    /* Produce an authenticated denial proving that no file exists
+     * with the given index. */
+    if(!rec)
+    {
+        return tm_verify_fileinfo(sp->tm,
+                                  user_id,
+                                  &rv1, rv1_hmac,
+                                  NULL, hash_null,
+                                  NULL, hash_null,
+                                  NULL, hash_null,
+                                  nonce,
+                                  hmac);
+    }
 
     /* RV2 indicates access rights */
     hash_t rv2_hmac;
@@ -1072,6 +1030,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                                  &rv2, rv2_hmac,
                                                  &rec->fr_cert, rec->fr_hmac,
                                                  ver ? &ver->vr_cert : NULL, ver ? ver->vr_hmac : hash_null,
+                                                 nonce,
                                                  hmac);
     free_record(rec);
     free_version(ver);
@@ -1253,6 +1212,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                                                   user_req.user_id,
                                                   user_req.retrieve.file_idx,
                                                   user_req.retrieve.version,
+                                                  user_req.retrieve.nonce,
                                                   &ack_hmac,
                                                   &acl);
         write(cl, &verinfo, sizeof(verinfo));
@@ -1371,7 +1331,7 @@ void sp_test(void)
         hash_t ack_hmac;
         struct tm_request req = sp_createfile(sp, 1, test_sign_request, "a", &ack_hmac);
 
-        check("File creation", ack_verify(&req, "a", 1, ack_hmac));
+        check("File creation", verify_ack(&req, "a", 1, ack_hmac));
 
         /* IOMT generation from file */
         struct iomt *buildcode = iomt_from_lines("container1/Dockerfile");
@@ -1391,15 +1351,15 @@ void sp_test(void)
         stop = clock();
         printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
-        check("File modification", ack_verify(&req, "a", 1, ack_hmac));
+        check("File modification", verify_ack(&req, "a", 1, ack_hmac));
 
         hash_t hmac;
         /* check inside range, but empty slot */
-        struct version_info vi = sp_fileinfo(sp, 1, 12, 1, &hmac, NULL);
+        struct version_info vi = sp_fileinfo(sp, 1, 12, 1, hash_null, &hmac, NULL);
         check("Authenticated denial 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         /* check outside range */
-        vi = sp_fileinfo(sp, 1, (1 << sp->iomt->mt_logleaves) + 1, 1, &hmac, NULL);
+        vi = sp_fileinfo(sp, 1, (1 << sp->iomt->mt_logleaves) + 1, 1, hash_null, &hmac, NULL);
         check("Authenticated denial 2", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
 
         /* check in range */
@@ -1407,6 +1367,7 @@ void sp_test(void)
                          1, /* user */
                          1, /* file */
                          1, /* version */
+                         hash_null,
                          &hmac,
                          NULL);
         check("File info retrieval 1", hash_equals(hmac, hmac_sha256(&vi, sizeof(vi), "a", 1)));
@@ -1457,7 +1418,7 @@ void sp_test(void)
                                                  newacl,
                                                  &ack);
 
-            success &= ack_verify(&req, "a", 1, ack);
+            success &= verify_ack(&req, "a", 1, ack);
         }
 
         check("ACL modification 1", success);

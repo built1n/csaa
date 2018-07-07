@@ -72,15 +72,18 @@ hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt
 /* Generate a signed acknowledgement for successful completion of a
  * request. We append a zero byte to the user request and take the
  * HMAC. */
-hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_t keylen);
-bool ack_verify(const struct tm_request *req,
+hash_t sign_ack(const struct tm_request *req, int nzeros, const void *key, size_t keylen);
+bool verify_ack(const struct tm_request *req,
                 const void *secret, size_t secret_len,
                 hash_t hmac);
 
-void write_to_fd(void *userdata, const void *data, size_t len);
-int read_from_fd(void *userdata, void *buf, size_t len);
+hash_t sign_verinfo(const struct version_info *verinfo, const void *key, size_t len);
+bool verify_verinfo(const struct version_info *verinfo, const void *key, size_t len, hash_t nonce, hash_t hmac);
 
 void dump_versioninfo(const struct version_info *verinfo);
+
+void write_to_fd(void *userdata, const void *data, size_t len);
+int read_from_fd(void *userdata, void *buf, size_t len);
 
 void crypt_bytes(unsigned char *data, size_t len, hash_t key);
 hash_t generate_nonce(void);

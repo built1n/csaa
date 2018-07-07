@@ -11,7 +11,10 @@
 
 hash_t hash_node(const struct iomt_node node)
 {
-    return sha256(&node, sizeof(node));
+    if(node.idx != 0)
+        return sha256(&node, sizeof(node));
+    else
+        return hash_null;
 }
 
 static void reset_and_bind(const struct iomt *tree, sqlite3_stmt *st)

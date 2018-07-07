@@ -120,7 +120,7 @@ hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t
  * representation of a binary tree. */
 uint64_t bintree_parent(uint64_t idx)
 {
-    return (idx - ((idx & 1) ? 1 : 2)) / 2;
+    return (idx - 1) / 2;
 }
 
 uint64_t bintree_sibling(uint64_t idx)
@@ -399,7 +399,7 @@ void crypt_bytes(unsigned char *data, size_t len, hash_t key)
 /* Generate a signed acknowledgement for successful completion of a
  * request. We append a zero byte to the user request and take the
  * HMAC. */
-hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_t keylen)
+hash_t sign_ack(const struct tm_request *req, int nzeros, const void *key, size_t keylen)
 {
     HMAC_CTX *ctx = HMAC_CTX_new();
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -425,11 +425,25 @@ hash_t ack_sign(const struct tm_request *req, int nzeros, const void *key, size_
     return hmac;
 }
 
-bool ack_verify(const struct tm_request *req,
+bool verify_ack(const struct tm_request *req,
                 const void *secret, size_t secret_len,
                 hash_t hmac)
 {
-    hash_t correct = ack_sign(req, 1, secret, secret_len);
+    hash_t correct = sign_ack(req, 1, secret, secret_len);
+    return hash_equals(hmac, correct);
+}
+
+hash_t sign_verinfo(const struct version_info *verinfo, const void *key, size_t len)
+{
+    return hmac_sha256(verinfo, sizeof(*verinfo), key, len);
+}
+
+bool verify_verinfo(const struct version_info *verinfo, const void *key, size_t len, hash_t nonce, hash_t hmac)
+{
+    if(!hash_equals(nonce, verinfo->nonce))
+        return false;
+
+    hash_t correct = sign_verinfo(verinfo, key, len);
     return hash_equals(hmac, correct);
 }
 

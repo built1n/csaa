@@ -94,6 +94,9 @@ struct version_info {
     uint64_t version, max_version;
     hash_t current_acl; /* not version ACL */
     hash_t lambda; /* equal to HMAC(h(encrypted_contents), key=HMAC(key, file_idx)) */
+
+    /* to prevent a replay attack */
+    hash_t nonce;
 };
 
 static const struct tm_request req_null = { REQ_NONE };
@@ -208,6 +211,7 @@ struct version_info tm_verify_fileinfo(const struct trusted_module *tm,
                                        const struct tm_cert *rv2, hash_t rv2_hmac,
                                        const struct tm_cert *fr, hash_t fr_hmac,
                                        const struct tm_cert *vr, hash_t vr_hmac,
+                                       hash_t nonce,
                                        hash_t *response_hmac);
 
 const char *tm_geterror(void);
