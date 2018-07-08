@@ -604,6 +604,7 @@ struct iomt *iomt_new_from_db(void *db,
              and_clauses);
     sqlite3_prepare_v2(db, sql, -1, &tree->db.findleaf, 0);
 
+    /* These both need table scans. FIXME */
     sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE ( ( Idx < ?3 AND ?3 < NextIdx ) OR ( NextIdx < Idx AND Idx < ?3 ) OR ( ?3 < NextIdx AND NextIdx < Idx ) )%s;",
              tree->db.leaves_table,
              and_clauses);
