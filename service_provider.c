@@ -240,18 +240,6 @@ void *db_init(const char *filename, bool overwrite, bool *need_init)
     return db;
 }
 
-void begin_transaction(void *db)
-{
-    sqlite3 *handle = db;
-    sqlite3_exec(handle, "BEGIN;", 0, 0, 0);
-}
-
-void commit_transaction(void *db)
-{
-    sqlite3 *handle = db;
-    sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
-}
-
 int count_placeholders(void *db)
 {
     sqlite3 *handle = db;
@@ -397,6 +385,8 @@ void sp_free(struct service_provider *sp)
     }
 }
 
+/* TODO: pre-compile these statements */
+
 /* linear search for record given idx */
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
@@ -433,10 +423,6 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
     return NULL;
 }
 
-/* Should we insert sorted (for O(logn) lookup), or just at the end to
- * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
- * be replaced with a SQL backend.  We do not check to ensure that
- * there are no duplicate file indices; that is up to the caller. */
 static void insert_record(struct service_provider *sp, const struct file_record *rec)
 {
     //printf("Inserting record %lu\n", rec->idx);
@@ -538,7 +524,9 @@ static struct file_version *lookup_version(struct service_provider *sp,
     sqlite3 *handle = sp->db;
 
     if(!version)
-        version = count_versions(sp, file_idx);
+    {
+        return NULL;
+    }
 
     const char *sql = "SELECT * FROM Versions WHERE FileIdx = ?1 AND Version = ?2;";
 
@@ -638,7 +626,7 @@ struct tm_cert sp_request(struct service_provider *sp,
 
             iomt_free(rec->acl);
 
-            /* copy the ACL into our database tables */
+            /* copy the ACL into our database tables (extremely slow) */
             rec->acl = iomt_dup_in_db(sp->db,
                                       "ACLNodes", "ACLLeaves",
                                       "FileIdx", fr.fr.idx,
@@ -792,6 +780,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
 
         sp->n_placeholders++;
     }
+
+    printf("Allocated leaf index %lu\n", i);
 
     int *file_orders;
     hash_t *file_comp = merkle_complement(sp->iomt, i, &file_orders);
@@ -1019,6 +1009,9 @@ struct version_info sp_fileinfo(struct service_provider *sp,
                                         user_id,
                                         &rv2_hmac);
 
+    if(!version)
+        version = rec->version;
+
     struct file_version *ver = lookup_version(sp, rec->idx, version);
 
     if(acl_out)
@@ -1038,7 +1031,7 @@ struct version_info sp_fileinfo(struct service_provider *sp,
     return ret;
 }
 
-/* This file retrieves the file given by file_idx for a given
+/* This function retrieves the file given by file_idx for a given
  * user. *encrypted_secret will be set to the encryption key XOR'd
  * with HMAC(kf, K). kf will be returned via the *kf pointer. The
  * returned value is dynamically allocated and must be freed by the
@@ -1057,16 +1050,18 @@ void *sp_retrieve_file(struct service_provider *sp,
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
-    if(!rec || !count_versions(sp, file_idx))
+    if(!rec || !rec->version)
     {
         /* Newly created file, no contents. We don't bother to set
-         * *encrypted_secret or *len. Or, file does not exist. */
+         * *encrypted_secret or *len. Or, file does not exist. No
+         * authenticated denial; the client can use sp_fileinfo() to
+         * verify this for themselves. */
         *len = 0;
         return NULL;
     }
 
     if(!version)
-        version = count_versions(sp, file_idx);
+        version = rec->version;
 
     struct file_version *ver = lookup_version(sp, file_idx, version);
 
@@ -1172,7 +1167,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
     case MODIFY_FILE:
     {
-        printf("Client: modify file\n");
+        printf("Client: modify file %lu\n", user_req.modify_file.file_idx);
         struct iomt *buildcode = iomt_deserialize(read_from_fd, &cl);
         struct iomt *composefile = iomt_deserialize(read_from_fd, &cl);
         size_t filelen;
@@ -1206,7 +1201,7 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
     case RETRIEVE_INFO:
     {
-        printf("Client: retrieve info\n");
+        printf("Client: retrieve info %lu\n", user_req.retrieve.file_idx);
         struct iomt *acl = NULL;
         struct version_info verinfo = sp_fileinfo(sp,
                                                   user_req.user_id,

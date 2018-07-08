@@ -90,6 +90,8 @@ void tm_savestate(const struct trusted_module *tm, const char *filename)
     }
 
     fwrite(&tm->root, sizeof(tm->root), 1, f);
+
+    printf("Saving state, root=%s\n", hash_format(tm->root, 4).str);
 }
 
 struct trusted_module *tm_new_from_savedstate(const char *filename)
@@ -114,6 +116,7 @@ struct trusted_module *tm_new_from_savedstate(const char *filename)
     }
 
     fread(&tm->root, sizeof(tm->root), 1, f);
+    printf("Loading state, root=%s\n", hash_format(tm->root, 4).str);
 
     return tm;
 }

@@ -90,6 +90,9 @@ hash_t generate_nonce(void);
 hash_t derive_key(const char *passphrase, hash_t nonce);
 hash_t calc_kf(hash_t encryption_key, uint64_t file_idx);
 
+void begin_transaction(void *db);
+void commit_transaction(void *db);
+
 void warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* self-test */

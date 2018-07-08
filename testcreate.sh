@@ -1,6 +1,6 @@
 #!/bin/bash
 echo "Create:"
-for i in $(seq 1 100)
+for i in $(seq 1 $2)
 do
     $1 -u 1 -k a create > /dev/null
     if [[ $? -ne 0 ]]

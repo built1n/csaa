@@ -106,6 +106,8 @@ struct iomt *iomt_deserialize(int (*read_fn)(void *userdata, void *buf, size_t l
                               void *userdata);
 
 void iomt_fill(struct iomt *tree);
+
+void print_leaf(struct iomt_node node);
 void iomt_dump(const struct iomt *tree);
 
 hash_t iomt_getroot(const struct iomt *tree);

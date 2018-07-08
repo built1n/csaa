@@ -41,12 +41,7 @@ hash_t sha256(const void *data, size_t datalen)
 
 bool is_zero(hash_t u)
 {
-    /* constant-time comparison */
-    volatile char c = 0;
-    for(int i = 0; i < 32; ++i)
-        c |= u.hash[i];
-
-    return c == 0;
+    return !memcmp(u.hash, hash_null.hash, sizeof(u.hash));
 }
 
 void dump_hash(hash_t u)
@@ -482,6 +477,18 @@ void warn(const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
 
     fprintf(stderr, "\033[31;1mWARNING\033[0m: %s\n", buf);
+}
+
+void begin_transaction(void *db)
+{
+    sqlite3 *handle = db;
+    sqlite3_exec(handle, "BEGIN;", 0, 0, 0);
+}
+
+void commit_transaction(void *db)
+{
+    sqlite3 *handle = db;
+    sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
 }
 
 void crypto_test(void)

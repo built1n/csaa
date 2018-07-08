@@ -12,27 +12,24 @@ DROP TABLE IF EXISTS CFLeaves;
 DROP TABLE IF EXISTS CFNodes;
 
 CREATE TABLE IF NOT EXISTS FileRecords (
-Idx INTEGER,
+Idx INTEGER PRIMARY KEY,
 Ver INTEGER,
 Ctr INTEGER,
 Cert BLOB,
 HMAC BLOB,
-ACL_logleaves INTEGER,
-PRIMARY KEY (Idx)
+ACL_logleaves INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS FileLeaves (
-LeafIdx INTEGER,
+LeafIdx INTEGER PRIMARY KEY,
 Idx INTEGER,
 NextIdx INTEGER,
-Val BLOB,
-PRIMARY KEY (LeafIdx)
+Val BLOB
 );
 
 CREATE TABLE IF NOT EXISTS FileNodes (
-NodeIdx INTEGER,
-Val BLOB,
-PRIMARY KEY (NodeIdx)
+NodeIdx INTEGER PRIMARY KEY,
+Val BLOB
 );
 
 CREATE TABLE IF NOT EXISTS Versions (
@@ -109,3 +106,8 @@ PRIMARY KEY (FileIdx, Version, NodeIdx),
 FOREIGN KEY (FileIdx) REFERENCES FileRecords(Idx),
 FOREIGN KEY (Version) REFERENCES Versions(Version)
 );
+
+CREATE INDEX Idx1 ON Versions(FileIdx, Version);
+CREATE INDEX Idx2 ON FileLeaves(Idx, NextIdx);
+CREATE INDEX Idx3 ON ACLLeaves(FileIdx, LeafIdx);
+CREATE INDEX Idx4 ON ACLNodes(FileIdx, NodeIdx);
