@@ -352,6 +352,14 @@ struct service_provider *sp_new(const void *key, size_t keylen,
 #endif
     }
 
+    /* prepare SQL statements */
+    sqlite3_prepare_v2(sp->db, "SELECT * FROM FileRecords WHERE Idx = ?1;", -1, &sp->lookup_record, 0);
+    sqlite3_prepare_v2(sp->db, "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 );", -1, &sp->insert_record, 0);
+    sqlite3_prepare_v2(sp->db, "UPDATE FileRecords SET Idx = ?1, Ver = ?2, Ctr = ?3, Cert = ?4, HMAC = ?5, ACL_logleaves = ?6 WHERE Idx = ?7;", -1, &sp->update_record, 0);
+    sqlite3_prepare_v2(sp->db, "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 );", -1, &sp->insert_version, 0);
+
+    sqlite3_prepare_v2(sp->db, "SELECT * FROM Versions WHERE FileIdx = ?1 AND Version = ?2;", -1, &sp->lookup_version, 0);
+
     return sp;
 }
 
@@ -380,6 +388,13 @@ void sp_free(struct service_provider *sp)
     {
         tm_free(sp->tm);
         iomt_free(sp->iomt);
+
+        sqlite3_finalize(sp->lookup_record);
+        sqlite3_finalize(sp->insert_record);
+        sqlite3_finalize(sp->update_record);
+        sqlite3_finalize(sp->insert_version);
+        sqlite3_finalize(sp->lookup_version);
+
         db_free(sp->db);
         free(sp);
     }
@@ -390,13 +405,9 @@ void sp_free(struct service_provider *sp)
 /* linear search for record given idx */
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->lookup_record;
 
-    const char *sql = "SELECT * FROM FileRecords WHERE Idx = ?1;";
-
-    sqlite3_stmt *st;
-
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
     sqlite3_bind_int64(st, 1, idx);
 
     int rc = sqlite3_step(st);
@@ -427,11 +438,10 @@ static void insert_record(struct service_provider *sp, const struct file_record 
 {
     //printf("Inserting record %lu\n", rec->idx);
 
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->insert_record;
 
-    const char *sql = "INSERT INTO FileRecords VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 );";
-    sqlite3_stmt *st;
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
+
     sqlite3_bind_int64(st, 1, rec->idx);
     sqlite3_bind_int64(st, 2, rec->version);
     sqlite3_bind_int64(st, 3, rec->counter);
@@ -440,8 +450,6 @@ static void insert_record(struct service_provider *sp, const struct file_record 
     sqlite3_bind_int(st, 6, rec->acl->mt_logleaves);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
-
-    sqlite3_finalize(st);
 }
 
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
@@ -451,12 +459,10 @@ static void insert_record(struct service_provider *sp, const struct file_record 
 static void update_record(struct service_provider *sp,
                           const struct file_record *rec)
 {
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->update_record;
 
-    const char *sql = "UPDATE FileRecords SET Idx = ?1, Ver = ?2, Ctr = ?3, Cert = ?4, HMAC = ?5, ACL_logleaves = ?6 WHERE Idx = ?7;";
+    sqlite3_reset(st);
 
-    sqlite3_stmt *st;
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
     sqlite3_bind_int64(st, 1, rec->idx);
     sqlite3_bind_int64(st, 2, rec->version);
     sqlite3_bind_int64(st, 3, rec->counter);
@@ -466,19 +472,16 @@ static void update_record(struct service_provider *sp,
     sqlite3_bind_int64(st, 7, rec->idx);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
-
-    sqlite3_finalize(st);
 }
 
 static void insert_version(struct service_provider *sp,
                            const struct file_record *rec,
                            const struct file_version *ver)
 {
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->insert_version;
 
-    const char *sql = "INSERT INTO Versions VALUES ( ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 );";
-    sqlite3_stmt *st;
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
+
     sqlite3_bind_int64(st, 1, rec->idx);
     sqlite3_bind_int64(st, 2, ver->version);
     sqlite3_bind_blob(st, 3, &ver->kf, sizeof(ver->kf), SQLITE_TRANSIENT);
@@ -493,10 +496,8 @@ static void insert_version(struct service_provider *sp,
     int rc = sqlite3_step(st);
     if(rc != SQLITE_DONE)
     {
-        printf("Failed (%s)\n", sqlite3_errmsg(handle));
+        printf("Failed\n");
     }
-
-    sqlite3_finalize(st);
 }
 
 static uint64_t count_versions(struct service_provider *sp,
@@ -521,18 +522,15 @@ static struct file_version *lookup_version(struct service_provider *sp,
                                            uint64_t file_idx,
                                            uint64_t version)
 {
-    sqlite3 *handle = sp->db;
-
     if(!version)
     {
         return NULL;
     }
 
-    const char *sql = "SELECT * FROM Versions WHERE FileIdx = ?1 AND Version = ?2;";
+    sqlite3_stmt *st = sp->lookup_version;
 
-    sqlite3_stmt *st;
+    sqlite3_reset(st);
 
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
     sqlite3_bind_int64(st, 1, file_idx);
     sqlite3_bind_int64(st, 2, version);
 
