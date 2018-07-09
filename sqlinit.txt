@@ -109,5 +109,6 @@ FOREIGN KEY (Version) REFERENCES Versions(Version)
 
 CREATE INDEX Idx1 ON Versions(FileIdx, Version);
 CREATE INDEX Idx2 ON FileLeaves(Idx, NextIdx);
-CREATE INDEX Idx3 ON ACLLeaves(FileIdx, LeafIdx);
-CREATE INDEX Idx4 ON ACLNodes(FileIdx, NodeIdx);
+CREATE INDEX Idx3 ON FileLeaves(NextIdx);
+CREATE INDEX Idx4 ON ACLLeaves(FileIdx, LeafIdx);
+CREATE INDEX Idx5 ON ACLNodes(FileIdx, NodeIdx);

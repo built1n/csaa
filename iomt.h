@@ -41,7 +41,11 @@ struct iomt {
 
             sqlite3_stmt *getnode, *updatenode, *insertnode;
             sqlite3_stmt *getleaf, *updateleaf, *insertleaf;
-            sqlite3_stmt *findleaf, *findencloser, *findleaf_or_encloser;
+            sqlite3_stmt *findleaf;
+            sqlite3_stmt *findencloser[3]; /* 3 cases, OR'd together
+                                            * (we run them
+                                            * individually so they're
+                                            * O(logn) each */
         } db;
         struct {
             hash_t *mt_nodes; /* this has 2 * mt_leafcount - 1 elements. Note

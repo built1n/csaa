@@ -347,21 +347,25 @@ struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint6
     }
     else
     {
-        sqlite3_stmt *st = tree->db.findencloser;
-        reset_and_bind(tree, st);
-
-        sqlite3_bind_int64(st, 3, idx);
-
-        if(sqlite3_step(st) == SQLITE_ROW)
+        /* try all three cases */
+        for(int i = 0; i < 3; ++i)
         {
-            if(leafidx)
-                *leafidx = sqlite3_column_int64(st, 0);
-            struct iomt_node ret;
-            ret.idx = sqlite3_column_int64(st, 1);
-            ret.next_idx = sqlite3_column_int64(st, 2);
-            memcpy(&ret.val, sqlite3_column_blob(st, 3), sizeof(ret.val));
+            sqlite3_stmt *st = tree->db.findencloser[i];
+            reset_and_bind(tree, st);
 
-            return ret;
+            sqlite3_bind_int64(st, 3, idx);
+
+            if(sqlite3_step(st) == SQLITE_ROW)
+            {
+                if(leafidx)
+                *leafidx = sqlite3_column_int64(st, 0);
+                struct iomt_node ret;
+                ret.idx = sqlite3_column_int64(st, 1);
+                ret.next_idx = sqlite3_column_int64(st, 2);
+                memcpy(&ret.val, sqlite3_column_blob(st, 3), sizeof(ret.val));
+
+                return ret;
+            }
         }
         return node_null;
     }
@@ -385,22 +389,14 @@ struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t id
     }
     else
     {
-        sqlite3_stmt *st = tree->db.findleaf_or_encloser;
-        reset_and_bind(tree, st);
+        struct iomt_node leaf = iomt_find_leaf(tree, idx, leafidx);
+        if(leaf.idx != 0)
+            return leaf;
 
-        sqlite3_bind_int64(st, 3, idx);
+        leaf = iomt_find_encloser(tree, idx, leafidx);
+        if(leaf.idx != 0)
+            return leaf;
 
-        if(sqlite3_step(st) == SQLITE_ROW)
-        {
-            if(leafidx)
-                *leafidx = sqlite3_column_int64(st, 0);
-            struct iomt_node ret;
-            ret.idx = sqlite3_column_int64(st, 1);
-            ret.next_idx = sqlite3_column_int64(st, 2);
-            memcpy(&ret.val, sqlite3_column_blob(st, 3), sizeof(ret.val));
-
-            return ret;
-        }
         return node_null;
     }
 }
@@ -604,16 +600,23 @@ struct iomt *iomt_new_from_db(void *db,
              and_clauses);
     sqlite3_prepare_v2(db, sql, -1, &tree->db.findleaf, 0);
 
-    /* These both need table scans. FIXME */
-    sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE ( ( Idx < ?3 AND ?3 < NextIdx ) OR ( NextIdx < Idx AND Idx < ?3 ) OR ( ?3 < NextIdx AND NextIdx < Idx ) )%s;",
+    /* These should all be O(log n) searches, not linear-time
+     * scans. We separate them since SQLite can't seem to handle them
+     * efficiently when OR'd together. */
+    sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE (Idx < ?3 AND ?3 < NextIdx)%s;",
              tree->db.leaves_table,
              and_clauses);
-    sqlite3_prepare_v2(db, sql, -1, &tree->db.findencloser, 0);
+    sqlite3_prepare_v2(db, sql, -1, &tree->db.findencloser[0], 0);
 
-    sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE ( ( Idx < ?3 AND ?3 < NextIdx ) OR ( NextIdx < Idx AND Idx < ?3 ) OR ( ?3 < NextIdx AND NextIdx < Idx ) OR ( Idx = ?3 ) )%s;",
+    sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE ( NextIdx < Idx AND Idx < ?3 )%s;",
              tree->db.leaves_table,
              and_clauses);
-    sqlite3_prepare_v2(db, sql, -1, &tree->db.findleaf_or_encloser, 0);
+    sqlite3_prepare_v2(db, sql, -1, &tree->db.findencloser[1], 0);
+
+    sprintf(sql, "SELECT LeafIdx, Idx, NextIdx, Val FROM %s WHERE ( ?3 < NextIdx AND NextIdx < Idx )%s;",
+             tree->db.leaves_table,
+             and_clauses);
+    sqlite3_prepare_v2(db, sql, -1, &tree->db.findencloser[2], 0);
 
     return tree;
 }
@@ -837,8 +840,9 @@ void iomt_free(struct iomt *tree)
             sqlite3_finalize(tree->db.updateleaf);
             sqlite3_finalize(tree->db.insertleaf);
             sqlite3_finalize(tree->db.findleaf);
-            sqlite3_finalize(tree->db.findencloser);
-            sqlite3_finalize(tree->db.findleaf_or_encloser);
+
+            for(int i = 0; i < 3; ++i)
+                sqlite3_finalize(tree->db.findencloser[i]);
         }
         free(tree);
     }
