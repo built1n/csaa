@@ -540,5 +540,8 @@ void crypto_test(void)
         //dump_hash(root2);
         check("Merkle compute", hash_equals(root1, root2));
     }
+
+    {
+    }
 #endif
 }

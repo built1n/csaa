@@ -37,7 +37,7 @@ int main()
         if(counts[i])
         {
             means[i] = sums[i] / counts[i];
-            printf("%d %g\n", 1<<i, means[i]);
+            printf("%d %g\n", i, means[i]);
         }
     }
 }

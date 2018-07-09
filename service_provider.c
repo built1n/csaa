@@ -1216,10 +1216,6 @@ static void sp_handle_client(struct service_provider *sp, int cl)
             iomt_serialize(acl, write_to_fd, &cl);
             iomt_free(acl);
         }
-        else
-        {
-            printf("failed: %s\n", tm_geterror());
-        }
 
         break;
     }
