@@ -1,5 +1,6 @@
 set xlabel "logleaves"
 set ylabel "avg time per operation (sec)"
+set yrange [0:]
 
 set terminal eps
 

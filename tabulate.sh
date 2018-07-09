@@ -1,8 +1,8 @@
 #!/bin/bash
-for i in `seq 4 10`
+for i in `seq 2 14`
 do
     rm -f all_"$i".txt
-    for j in `seq 1 3`
+    for j in `seq 1 1`
     do
         echo -n "$i $j " >> all_"$i".txt
         cat run_"$i"_"$j".txt | awk '/Elapsed/ || /Maximum/ || /User time/ || /System time/' | awk 'BEGIN{line=0}{if(line%4<=1)printf($4" ");if(line %4==2)printf($8" ");if(line%4==3)printf($6" ");}{line+=1}END{printf("\n");}' >> all_"$i".txt
