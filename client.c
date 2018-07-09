@@ -449,7 +449,7 @@ bool exec_request(int fd, const struct user_request *req,
 
         if(verify_verinfo(&verinfo, user_key, keylen, req->retrieve.nonce, hmac))
         {
-            if(verinfo.idx != 0)
+            if(verinfo.idx != 0 && !is_zero(verinfo.current_acl))
             {
                 struct iomt *acl = iomt_deserialize(read_from_fd, &fd);
                 printf("ACL: ");
