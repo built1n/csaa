@@ -60,7 +60,9 @@ int main()
 
             stderrs[i] = stddevs[i] / sqrt(counts[i]);
 
-            printf("%d %g %g\n", i, means[i], stderrs[i]);
+	    /* 95% confidence interval */
+	    double z = 1.96;
+            printf("%d %g %g\n", i, means[i], z * stderrs[i]);
         }
     }
 }

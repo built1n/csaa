@@ -1,8 +1,8 @@
 #!/bin/bash
 mkdir -p results
-trials=1
+trials=5
 
-for i in `seq 2 14`
+for i in `seq 2 10`
 do
     echo "logleaves "$i
 
@@ -16,7 +16,7 @@ do
         sleep .2
 
         # dummy
-        #./testdummy.sh $i $runs 2> results/dummy_"$i"_"$j".txt
-        #sleep .2
+        ./testdummy.sh $i $runs 2> results/dummy_"$i"_"$j".txt
+        sleep .2
     done
 done
