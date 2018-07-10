@@ -299,14 +299,8 @@ hash_t crypt_secret(hash_t encrypted_secret,
 
 /* These are all fixed-length fields, so we can safely append them and
  * forgo any HMAC. */
-hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf)
+hash_t calc_lambda(hash_t gamma, hash_t buildcode_root, hash_t composefile_root, hash_t kf)
 {
-    hash_t buildcode_root = hash_null, composefile_root = hash_null;
-    if(buildcode)
-        buildcode_root = iomt_getroot(buildcode);
-    if(composefile)
-        composefile_root = iomt_getroot(composefile);
-
     SHA256_CTX ctx;
     hash_t h;
 
@@ -489,6 +483,33 @@ void commit_transaction(void *db)
 {
     sqlite3 *handle = db;
     sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
+}
+
+void *deserialize_file(int cl, size_t *len)
+{
+    recv(cl, len, sizeof(*len), MSG_WAITALL);
+    
+    printf("File is %lu bytes.\n", *len);
+
+    if(!*len)
+        return NULL;
+    
+    void *buf = malloc(*len);
+    recv(cl, buf, *len, MSG_WAITALL);
+
+    return buf;
+}
+
+void serialize_file(int cl, const void *buf, size_t len)
+{
+    if(!buf)
+	len = 0;
+    write(cl, &len, sizeof(len));
+
+    if(!buf || !len)
+	return;
+
+    write(cl, buf, len);
 }
 
 void crypto_test(void)

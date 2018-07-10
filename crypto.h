@@ -67,7 +67,7 @@ hash_t crypt_secret(hash_t encrypted_secret,
 
 struct iomt;
 
-hash_t calc_lambda(hash_t gamma, const struct iomt *buildcode, const struct iomt *composefile, hash_t kf);
+hash_t calc_lambda(hash_t gamma, hash_t h_bc, hash_t h_cf, hash_t kf);
 
 /* Generate a signed acknowledgement for successful completion of a
  * request. We append a zero byte to the user request and take the
@@ -92,6 +92,9 @@ hash_t calc_kf(hash_t encryption_key, uint64_t file_idx);
 
 void begin_transaction(void *db);
 void commit_transaction(void *db);
+
+void *deserialize_file(int cl, size_t *len);
+void serialize_file(int cl, const void *buf, size_t len);
 
 void warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
