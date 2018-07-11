@@ -85,8 +85,8 @@ struct tm_cert sp_request(struct service_provider *sp,
                           hash_t *ack_hmac_out,
                           hash_t encrypted_secret, hash_t kf,
                           const void *encrypted_contents, size_t contents_len,
-			  const void *buildcode, size_t buildcode_len,
-			  const void *composefile, size_t composefile_len,
+                          const void *buildcode, size_t buildcode_len,
+                          const void *composefile, size_t composefile_len,
                           const struct iomt *new_acl);
 
 /* Reserve a new file index with user_id added to the ACL. Returns
@@ -113,8 +113,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                 uint64_t file_idx,
                                 hash_t encrypted_secret, hash_t kf,
                                 const void *encrypted_file, size_t filelen,
-				const void *buildcode, size_t buildcode_len,
-				const void *composefile, size_t composefile_len,
+                                const void *buildcode, size_t buildcode_len,
+                                const void *composefile, size_t composefile_len,
                                 hash_t *ack_hmac);
 
 /* Retrieve authenticated information on a version of a file; if
@@ -134,9 +134,9 @@ void *sp_retrieve_file(struct service_provider *sp,
                        hash_t *encrypted_secret,
                        hash_t *kf,
                        void **buildcode,
-		       size_t *bc_len,
+                       size_t *bc_len,
                        void **composefile,
-		       size_t *cf_len,
+                       size_t *cf_len,
                        size_t *len);
 
 void sp_test(void);

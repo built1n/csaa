@@ -169,8 +169,8 @@ size_t file_len(FILE *f)
 }
 
 void *read_contents(const struct service_provider *sp,
-		    uint64_t file_idx, uint64_t version, const char *suffix,
-		    size_t *len)
+                    uint64_t file_idx, uint64_t version, const char *suffix,
+                    size_t *len)
 {
     assert(len);
     char filename[MAX_PATH];
@@ -180,10 +180,10 @@ void *read_contents(const struct service_provider *sp,
 
     if(!f)
     {
-	*len = 0;
-	return NULL;
+        *len = 0;
+        return NULL;
     }
-    
+
     *len = file_len(f);
 
     void *buf = malloc(*len);
@@ -496,7 +496,7 @@ static void insert_version(struct service_provider *sp,
 }
 
 static uint64_t count_versions(struct service_provider *sp,
-                          uint64_t file_idx)
+                               uint64_t file_idx)
 {
     sqlite3 *handle = sp->db;
 
@@ -569,8 +569,8 @@ struct tm_cert sp_request(struct service_provider *sp,
                           hash_t *ack_hmac_out,
                           hash_t encrypted_secret, hash_t kf,
                           const void *encrypted_contents, size_t contents_len,
-			  const void *buildcode, size_t buildcode_len,
-			  const void *composefile, size_t composefile_len,
+                          const void *buildcode, size_t buildcode_len,
+                          const void *composefile, size_t composefile_len,
                           const struct iomt *new_acl)
 {
     struct tm_cert vr = cert_null;
@@ -643,23 +643,23 @@ struct tm_cert sp_request(struct service_provider *sp,
             ver.version = fr.fr.version;
             ver.vr_cert = vr;
             ver.vr_hmac = vr_hmac;
-	    
-	    /* write to disk */
+
+            /* write to disk */
             if(encrypted_contents)
-		write_contents(sp, fr.fr.idx, fr.fr.version, "",
-			       encrypted_contents, contents_len);
-	    
-	    if(buildcode)
-		 write_contents(sp, fr.fr.idx, fr.fr.version, "_bc",
-				buildcode, buildcode_len);
-	    
-	    if(composefile)
-		 write_contents(sp, fr.fr.idx, fr.fr.version, "_cf",
-				composefile, composefile_len);
-	    
+                write_contents(sp, fr.fr.idx, fr.fr.version, "",
+                               encrypted_contents, contents_len);
+
+            if(buildcode)
+                write_contents(sp, fr.fr.idx, fr.fr.version, "_bc",
+                               buildcode, buildcode_len);
+
+            if(composefile)
+                write_contents(sp, fr.fr.idx, fr.fr.version, "_cf",
+                               composefile, composefile_len);
+
             insert_version(sp, rec, &ver);
         }
-	
+
         if(need_insert)
             insert_record(sp, rec);
         else
@@ -774,8 +774,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
     sp->next_fileidx++;
 
     iomt_update_leaf_full(acl,
-                           0,
-                           user_id, user_id, u64_to_hash(3));
+                          0,
+                          user_id, user_id, u64_to_hash(3));
 
     struct tm_request req = req_filecreate(sp->tm,
                                            user_id,
@@ -791,7 +791,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         NULL, NULL,
                                         ack_hmac,
                                         hash_null, hash_null,
-					NULL, 0,
+                                        NULL, 0,
                                         NULL, 0,
                                         NULL, 0,
                                         acl);
@@ -858,7 +858,7 @@ struct tm_request sp_modifyacl(struct service_provider *sp,
                                        NULL, NULL,
                                        ack_hmac,
                                        hash_null, hash_null,
-				       NULL, 0,
+                                       NULL, 0,
                                        NULL, 0,
                                        NULL, 0,
                                        new_acl);
@@ -875,8 +875,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                 uint64_t file_idx,
                                 hash_t encrypted_secret, hash_t kf,
                                 const void *encrypted_file, size_t filelen,
-				const void *buildcode, size_t buildcode_len,
-				const void *composefile, size_t composefile_len,
+                                const void *buildcode, size_t buildcode_len,
+                                const void *composefile, size_t composefile_len,
                                 hash_t *ack_hmac)
 {
     /* modification */
@@ -940,8 +940,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                        ack_hmac,
                                        encrypted_secret, kf,
                                        encrypted_file, filelen,
-				       buildcode, buildcode_len,
-				       composefile, composefile_len,
+                                       buildcode, buildcode_len,
+                                       composefile, composefile_len,
                                        NULL);
 
     /* We return the request because that is how the module's
@@ -1030,9 +1030,9 @@ void *sp_retrieve_file(struct service_provider *sp,
                        hash_t *encrypted_secret,
                        hash_t *kf,
                        void **buildcode,
-		       size_t *bc_len,
+                       size_t *bc_len,
                        void **composefile,
-		       size_t *cf_len,
+                       size_t *cf_len,
                        size_t *len)
 {
     struct file_record *rec = lookup_record(sp, file_idx);
@@ -1088,9 +1088,9 @@ void *sp_retrieve_file(struct service_provider *sp,
 
     /* read contents of build/compose files */
     if(buildcode)
-	 *buildcode = read_contents(sp, file_idx, version, "_bc", bc_len);
+        *buildcode = read_contents(sp, file_idx, version, "_bc", bc_len);
     if(composefile)
-	 *composefile = read_contents(sp, file_idx, version, "_cf", cf_len);
+        *composefile = read_contents(sp, file_idx, version, "_cf", cf_len);
 
     free_record(rec);
     free_version(ver);
@@ -1155,13 +1155,13 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     case MODIFY_FILE:
     {
         printf("Client: modify file %lu\n", user_req.modify_file.file_idx);
-	size_t filelen;
-	void *filebuf = deserialize_file(cl, &filelen);
+        size_t filelen;
+        void *filebuf = deserialize_file(cl, &filelen);
 
-	size_t bc_len, cf_len;
-	void *bc = deserialize_file(cl, &bc_len);
-	void *cf = deserialize_file(cl, &cf_len);
-	
+        size_t bc_len, cf_len;
+        void *bc = deserialize_file(cl, &bc_len);
+        void *cf = deserialize_file(cl, &cf_len);
+
         if(sp_modifyfile(sp,
                          user_req.user_id,
                          get_client_signature,
@@ -1170,8 +1170,8 @@ static void sp_handle_client(struct service_provider *sp, int cl)
                          user_req.modify_file.encrypted_secret,
                          user_req.modify_file.kf,
                          filebuf, filelen,
-			 bc, bc_len,
-			 cf, cf_len,
+                         bc, bc_len,
+                         cf, cf_len,
                          &ack_hmac).type == REQ_NONE)
         {
             printf("Failed: %s\n", tm_geterror());
@@ -1209,30 +1209,30 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         printf("Client: retrieve file\n");
         hash_t encrypted_secret = hash_null, kf = hash_null;
         size_t len = 0;
-	void *bc = NULL, *cf = NULL;
-	size_t bc_len = 0, cf_len = 0;
-	
+        void *bc = NULL, *cf = NULL;
+        size_t bc_len = 0, cf_len = 0;
+
         void *contents = sp_retrieve_file(sp,
                                           user_req.user_id,
                                           user_req.retrieve.file_idx,
                                           user_req.retrieve.version,
                                           &encrypted_secret,
                                           &kf,
-					  &bc, &bc_len,
-					  &cf, &cf_len,
+                                          &bc, &bc_len,
+                                          &cf, &cf_len,
                                           &len);
         /* write everything (no HMAC; the client should do a
          * RETRIEVE_INFO request separately) */
         write(cl, &encrypted_secret, sizeof(encrypted_secret));
         write(cl, &kf, sizeof(kf));
 
-	serialize_file(cl, contents, len);
-	serialize_file(cl, bc, bc_len);
-	serialize_file(cl, cf, cf_len);
-	
-	free(contents);
-	free(bc);
-	free(cf);
+        serialize_file(cl, contents, len);
+        serialize_file(cl, bc, bc_len);
+        serialize_file(cl, cf, cf_len);
+
+        free(contents);
+        free(bc);
+        free(cf);
 
         break;
     }
@@ -1327,7 +1327,7 @@ void sp_test(void)
         printf("%.1f modifications per second\n", (double)N_MODIFY * CLOCKS_PER_SEC / (stop - start));
 
         check("File modification", verify_ack(&req, "a", 1, ack_hmac));
-	
+
         hash_t hmac;
         /* check inside range, but empty slot */
         struct version_info vi = sp_fileinfo(sp, 1, 12, 1, hash_null, &hmac, NULL);
@@ -1399,7 +1399,7 @@ void sp_test(void)
         check("ACL modification 1", success);
     }
 #endif
-    
+
     if(logleaves < 5)
     {
         printf("CDI-IOMT contents: ");

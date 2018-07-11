@@ -1,9 +1,9 @@
 #!/bin/bash
-for i in `seq 2 10`
+for i in `seq 2 17`
 do
     rm -f all_"$i".txt
     rm -f dummy_all_"$i".txt
-    for j in `seq 1 5`
+    for j in `seq 1 3`
     do
         echo -n "$i $j " >> all_"$i".txt
 	echo -n "$i $j " >> dummy_all_"$i".txt

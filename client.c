@@ -386,7 +386,7 @@ bool exec_request(int fd, const struct user_request *req,
                   struct version_info *verinfo_out,          /* RETRIEVE_INFO only */
                   const void *user_key, size_t keylen,       /* RETRIEVE_INFO and RETRIEVE_FILE only */
                   void **buildcode, size_t *bc_len_out,      /* RETRIEVE_FILE only */
-		  void **composefile, size_t *cf_len_out,    /* RETRIEVE_FILE only */
+                  void **composefile, size_t *cf_len_out,    /* RETRIEVE_FILE only */
                   hash_t *secret_out,                        /* RETRIEVE_FILE only */
                   void **file_contents_out,                  /* RETRIEVE_FILE only */
                   size_t *file_len)                          /* RETRIEVE_FILE only */
@@ -401,9 +401,9 @@ bool exec_request(int fd, const struct user_request *req,
         break;
     case MODIFY_FILE:
         /* send build code, compose file, and file contents */
-	serialize_file(fd, new_file_contents, len);
-	serialize_file(fd, new_bc, new_bc_len);
-	serialize_file(fd, new_cf, new_cf_len);
+        serialize_file(fd, new_file_contents, len);
+        serialize_file(fd, new_bc, new_bc_len);
+        serialize_file(fd, new_cf, new_cf_len);
         break;
     case CREATE_FILE:
     case RETRIEVE_INFO:
@@ -424,12 +424,12 @@ bool exec_request(int fd, const struct user_request *req,
         if(req->type == MODIFY_FILE)
         {
             hash_t gamma = sha256(new_file_contents, len);
-	    hash_t h_bc = new_bc ? sha256(new_bc, new_bc_len) : hash_null;
-	    hash_t h_cf = new_cf ? sha256(new_cf, new_cf_len) : hash_null;
-	    
+            hash_t h_bc = new_bc ? sha256(new_bc, new_bc_len) : hash_null;
+            hash_t h_cf = new_cf ? sha256(new_cf, new_cf_len) : hash_null;
+
             val = calc_lambda(gamma,
-			      h_bc,
-			      h_cf,
+                              h_bc,
+                              h_cf,
                               req->modify_file.kf);
         }
         else if(req->type == MODIFY_ACL)
@@ -478,12 +478,12 @@ bool exec_request(int fd, const struct user_request *req,
         else
             *secret_out = hash_null;
 
-	*file_contents_out = deserialize_file(fd, file_len);
-	
+        *file_contents_out = deserialize_file(fd, file_len);
+
         *buildcode = deserialize_file(fd, bc_len_out);
         *composefile = deserialize_file(fd, cf_len_out);
 
-	return *file_contents_out != NULL;
+        return *file_contents_out != NULL;
     }
     default:
         assert(false);
@@ -552,8 +552,8 @@ int connect_to_service(const char *sockpath)
 void *load_file(const char *path, size_t *len)
 {
     if(!path)
-      return NULL;
-    
+        return NULL;
+
     FILE *f = fopen(path, "r");
     fseek(f, 0, SEEK_END);
     *len = ftell(f);
@@ -593,7 +593,7 @@ bool server_request(const char *sockpath,
     {
         /* these can safely take NULLs */
         buildcode = load_file(buildcode_path, &bc_len);
-	composefile = load_file(compose_path, &cf_len);
+        composefile = load_file(compose_path, &cf_len);
 
         if(image_path)
         {
@@ -649,9 +649,9 @@ bool server_request(const char *sockpath,
     bool success = exec_request(fd, &req,
                                 req.type == MODIFY_ACL ? new_acl : NULL,
                                 req.type == MODIFY_FILE ? buildcode : NULL,
-				req.type == MODIFY_FILE ? bc_len : 0,
+                                req.type == MODIFY_FILE ? bc_len : 0,
                                 req.type == MODIFY_FILE ? composefile : NULL,
-				req.type == MODIFY_FILE ? cf_len : 0,
+                                req.type == MODIFY_FILE ? cf_len : 0,
                                 req.type == MODIFY_FILE ? file_contents : NULL,
                                 req.type == MODIFY_FILE ? file_len : 0,
                                 req.type <= MODIFY_ACL ? &tmreq : NULL,
@@ -659,9 +659,9 @@ bool server_request(const char *sockpath,
                                 req.type >= RETRIEVE_INFO ? user_key : NULL,
                                 req.type >= RETRIEVE_INFO ? strlen(user_key) : 0,
                                 req.type == RETRIEVE_FILE ? &buildcode : NULL,
-				req.type == RETRIEVE_FILE ? &bc_len : NULL,
+                                req.type == RETRIEVE_FILE ? &bc_len : NULL,
                                 req.type == RETRIEVE_FILE ? &composefile : NULL,
-				req.type == RETRIEVE_FILE ? &cf_len : NULL,
+                                req.type == RETRIEVE_FILE ? &cf_len : NULL,
                                 req.type == RETRIEVE_FILE ? &secret : NULL,
                                 req.type == RETRIEVE_FILE ? &file_contents : NULL,
                                 req.type == RETRIEVE_FILE ? &file_len : NULL);
@@ -688,9 +688,9 @@ bool server_request(const char *sockpath,
     case RETRIEVE_FILE:
     {
         hash_t gamma = sha256(file_contents, file_len);
-	
-	hash_t h_bc = buildcode ? sha256(buildcode, bc_len) : hash_null;
-	hash_t h_cf = composefile ? sha256(composefile, cf_len) : hash_null;
+
+        hash_t h_bc = buildcode ? sha256(buildcode, bc_len) : hash_null;
+        hash_t h_cf = composefile ? sha256(composefile, cf_len) : hash_null;
 
         hash_t kf = calc_kf(secret, req.retrieve.file_idx);
 
@@ -707,10 +707,10 @@ bool server_request(const char *sockpath,
         printf("Writing image file to %s.\n", image_path);
         write_file(image_path, file_contents, file_len);
 
-	if(buildcode_path && buildcode)
+        if(buildcode_path && buildcode)
             write_file(buildcode_path, buildcode, bc_len);
 
-	if(compose_path && composefile)
+        if(compose_path && composefile)
             write_file(compose_path, composefile, cf_len);
         /* What about build code? We only have the IOMT, not the actual contents. */
 
