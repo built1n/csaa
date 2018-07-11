@@ -1,8 +1,8 @@
 #!/bin/bash
 mkdir -p results
-trials=5
+trials=1
 
-for i in `seq 2 10`
+for i in `seq 8 18`
 do
     echo "logleaves "$i
 

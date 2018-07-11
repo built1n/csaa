@@ -7,7 +7,7 @@ sqlinit.c: sqlinit.txt
 dummy_main.o: main.c
 	cc -c -o $@ $^ -DDUMMY $(CFLAGS)
 
-dummy_client: dummy_client.o crypto.o test.o iomt.o
+dummy_client: dummy_client.o crypto.o test.o iomt.o sqlinit.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
 dummy_server: dummy_service.o dummy_main.o sqlinit.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)

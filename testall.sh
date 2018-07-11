@@ -21,3 +21,4 @@ sleep .2
 echo "Encrypted retrieve: "
 /usr/bin/time -v ./testretrieve.sh ./client $runs
 kill -SIGINT $!
+rm csaa.db

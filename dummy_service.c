@@ -40,6 +40,8 @@ struct service_provider {
     const char *data_dir;
 
     void *db; /* sqlite3 handle */
+
+    sqlite3_stmt *lookup_record, *insert_record, *update_record, *max_record;
 };
 
 /* write to file data_dir/file_idx/version */
@@ -92,6 +94,30 @@ void *read_contents(const struct service_provider *sp,
     return buf;
 }
 
+int count_rows(void *db, const char *table)
+{
+    char buf[1000];
+    snprintf(buf, sizeof(buf), "SELECT COUNT(*) FROM %s;", table);
+
+    sqlite3_stmt *st;
+    sqlite3_prepare_v2(db, buf, -1, &st, 0);
+
+    /* no table */
+    if(sqlite3_step(st) != SQLITE_ROW)
+        return 0;
+
+    int rows = sqlite3_column_int(st, 0);
+
+    sqlite3_finalize(st);
+
+    return rows;
+}
+
+void db_free(void *handle)
+{
+    sqlite3_close(handle);
+}
+
 void *db_init(const char *filename)
 {
     sqlite3 *db;
@@ -101,6 +127,14 @@ void *db_init(const char *filename)
     sqlite3_exec(db, "PRAGMA synchronous = 0;", 0, 0, 0);
     sqlite3_exec(db, "PRAGMA journal_mode = memory;", 0, 0, 0);
 
+    if(count_rows(db, "FileLeaves") == 0)
+    {
+        extern unsigned char sqlinit_txt[];
+
+        /* create tables */
+        assert(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, NULL) == SQLITE_OK);
+    }
+    
     return db;
 }
 
@@ -126,6 +160,14 @@ struct service_provider *sp_new(const void *key, size_t keylen, int logleaves, c
 
     sp->data_dir = data_dir;
 
+    sqlite3_prepare_v2(sp->db, "SELECT MAX(Idx) from FileRecords;",
+		       -1, &sp->max_record, 0);
+    sqlite3_prepare_v2(sp->db, "SELECT * FROM FileRecords WHERE Idx = ?1;",
+		       -1, &sp->lookup_record, 0);
+    sqlite3_prepare_v2(sp->db, "INSERT INTO FileRecords (Idx, Ver) VALUES ( ?1, ?2 );",
+		       -1, &sp->insert_record, 0);
+    sqlite3_prepare_v2(sp->db, "UPDATE FileRecords SET Idx = ?1, Ver = ?2 WHERE Idx = ?7;",
+		       -1, &sp->update_record, 0);
     return sp;
 }
 
@@ -148,13 +190,9 @@ void sp_free(struct service_provider *sp)
 /* linear search for record given idx */
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->lookup_record;
 
-    const char *sql = "SELECT * FROM FileRecords WHERE Idx = ?1;";
-
-    sqlite3_stmt *st;
-
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
     sqlite3_bind_int(st, 1, idx);
 
     int rc = sqlite3_step(st);
@@ -177,19 +215,14 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
  * there are no duplicate file indices; that is up to the caller. */
 static void insert_record(struct service_provider *sp, const struct file_record *rec)
 {
-    //printf("Inserting record %lu\n", rec->idx);
+    sqlite3_stmt *st = sp->insert_record;
 
-    sqlite3 *handle = sp->db;
-
-    const char *sql = "INSERT INTO FileRecords (Idx, Ver) VALUES ( ?1, ?2 );";
-    sqlite3_stmt *st;
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
+    
     sqlite3_bind_int(st, 1, rec->idx);
     sqlite3_bind_int(st, 2, rec->version);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
-
-    sqlite3_finalize(st);
 }
 
 /* Should we insert sorted (for O(logn) lookup), or just at the end to
@@ -199,19 +232,15 @@ static void insert_record(struct service_provider *sp, const struct file_record 
 static void update_record(struct service_provider *sp,
                           const struct file_record *rec)
 {
-    sqlite3 *handle = sp->db;
+    sqlite3_stmt *st = sp->update_record;
 
-    const char *sql = "UPDATE FileRecords SET Idx = ?1, Ver = ?2 WHERE Idx = ?7;";
-
-    sqlite3_stmt *st;
-    sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_reset(st);
+    
     sqlite3_bind_int(st, 1, rec->idx);
     sqlite3_bind_int(st, 2, rec->version);
     sqlite3_bind_int(st, 7, rec->idx);
 
     assert(sqlite3_step(st) == SQLITE_DONE);
-
-    sqlite3_finalize(st);
 }
 
 /* This does the majority of the work that actually modifies or
@@ -267,14 +296,7 @@ void sp_request(struct service_provider *sp,
 
 int next_slot(struct service_provider *sp)
 {
-    const char *sql = "SELECT MAX(Idx) from FileRecords;";
-
-    static sqlite3_stmt *st = NULL;
-
-    sqlite3 *handle = sp->db;
-
-    if(!st)
-        sqlite3_prepare_v2(handle, sql, -1, &st, 0);
+    sqlite3_stmt *st = sp->max_record;
 
     sqlite3_reset(st);
 
