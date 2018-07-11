@@ -358,7 +358,7 @@ struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint6
             if(sqlite3_step(st) == SQLITE_ROW)
             {
                 if(leafidx)
-                *leafidx = sqlite3_column_int64(st, 0);
+                    *leafidx = sqlite3_column_int64(st, 0);
                 struct iomt_node ret;
                 ret.idx = sqlite3_column_int64(st, 1);
                 ret.next_idx = sqlite3_column_int64(st, 2);

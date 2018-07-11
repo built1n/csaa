@@ -231,7 +231,8 @@ void *db_init(const char *filename, bool overwrite, bool *need_init)
         extern unsigned char sqlinit_txt[];
 
         /* create tables */
-        assert(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, NULL) == SQLITE_OK);
+        if(sqlite3_exec(db, (const char*)sqlinit_txt, NULL, NULL, NULL) != SQLITE_OK)
+            warn("failed to initialize database (%s)", sqlite3_errmsg(db));
 
         *need_init = true;
     }
@@ -1294,10 +1295,10 @@ static hash_t test_sign_request(void *userdata, const struct tm_request *req)
 
 void sp_test(void)
 {
-    int logleaves = 1;
+    int logleaves = 4;
 
     clock_t start = clock();
-    struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaa.db", true);
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaatest.db", true);
     clock_t stop = clock();
 
     check("Tree initialization", sp != NULL);
@@ -1407,4 +1408,42 @@ void sp_test(void)
     }
 
     sp_free(sp);
+
+    /* test IOMT code (requires a service provider for the databases) */
+    {
+        struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaatest.db", true);
+        iomt_dump(sp->iomt);
+
+        iomt_update_leaf_nextidx(sp->iomt, 0, 2);
+        iomt_update_leaf_full(sp->iomt, 3, 2, 1, hash_null);
+
+        iomt_dump(sp->iomt);
+
+        /* should fail */
+        struct iomt_node encloser = iomt_find_encloser(sp->iomt, 2, NULL);
+        check("Encloser search 1", encloser.idx == 0);
+
+        encloser = iomt_find_encloser(sp->iomt, 4, NULL);
+        check("Encloser search 2", encloser.idx == 2 && encloser.next_idx == 1);
+
+        encloser = iomt_find_leaf_or_encloser(sp->iomt, 2, NULL);
+        check("Encloser/leaf search 1", encloser.idx == 2);
+
+        encloser = iomt_find_leaf_or_encloser(sp->iomt, 1000, NULL);
+        check("Encloser/leaf search 2", encloser.idx == 2);
+
+        iomt_update_leaf_full(sp->iomt, 3, 10, 3, hash_null);
+
+        iomt_update_leaf_full(sp->iomt, 0, 3, 10, hash_null);
+
+        iomt_dump(sp->iomt);
+
+        encloser = iomt_find_leaf_or_encloser(sp->iomt, 5, NULL);
+        check("Encloser/leaf search 3", encloser.idx == 3);
+
+        encloser = iomt_find_leaf_or_encloser(sp->iomt, 2, NULL);
+        check("Encloser/leaf search 4", encloser.idx == 10);
+
+        sp_free(sp);
+    }
 }
