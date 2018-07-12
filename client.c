@@ -501,6 +501,7 @@ struct version_info request_verinfo(int fd, uint64_t user_id,
     req.user_id = user_id;
     req.retrieve.file_idx = file_idx;
     req.retrieve.version = version;
+    req.retrieve.nonce = generate_nonce();
 
     struct version_info verinfo;
 
