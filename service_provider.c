@@ -773,12 +773,9 @@ struct tm_request sp_createfile(struct service_provider *sp,
     int *file_orders;
     hash_t *file_comp = merkle_complement(sp->iomt, i, &file_orders);
 
-    struct iomt *acl = iomt_new_from_db(sp->db,
-                                        "ACLNodes", "ACLLeaves",
-                                        "FileIdx", sp->next_fileidx,
-                                        NULL, 0,
-                                        ACL_LOGLEAVES);
-
+    /* We create the ACL IOMT in memory first; sp_request() will copy
+       it into the database. */
+    struct iomt *acl = iomt_new(1);
     sp->next_fileidx++;
 
     iomt_update_leaf_full(acl,
@@ -805,6 +802,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         acl);
     sp->n_placeholders--;
 
+    /* sp_request() has made a copy of the ACL */
     iomt_free(acl);
     free(file_comp);
     free(file_orders);
