@@ -121,7 +121,6 @@ void iomt_setnode(const struct iomt *tree, uint64_t idx, hash_t val);
 
 struct iomt_node iomt_getleaf(const struct iomt *tree, uint64_t leafidx);
 
-/* All linear searches... slow! */
 struct iomt_node iomt_find_leaf(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
 struct iomt_node iomt_find_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);
 struct iomt_node iomt_find_leaf_or_encloser(const struct iomt *tree, uint64_t idx, uint64_t *leafidx);

@@ -738,6 +738,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
     }
     else
     {
+        /* NOTE: this relies on files being created with a sequential
+         * numbering; this can be changed if needed. */
         /* we must insert a placeholder node; first find the index of
          * the leaf that loops around to 1 */
         i = sp->next_fileidx - 1;
@@ -749,6 +751,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
         }
 
         /* generate EQ certificate */
+        /* if we assigned indices in a random order we'd have to use
+         * iomt_find_encloser for this. */
         hash_t hmac;
         struct tm_cert eq = cert_eq(sp,
                                     iomt_getleaf(sp->iomt, i - 1),
@@ -763,6 +767,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
         /* next_idx is set to 1 to keep everything circularly linked;
          * in the next iteration it will be updated to point to the
          * next node, if any */
+        /* for random indices, recall the encloser's old next index,
+         * and use that here */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
