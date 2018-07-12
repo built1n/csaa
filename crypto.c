@@ -111,18 +111,6 @@ hash_t merkle_compute(hash_t node, const hash_t *comp, const int *orders, size_t
     return parent;
 }
 
-/* Given a node's index, return the index of the parent in an array
- * representation of a binary tree. */
-uint64_t bintree_parent(uint64_t idx)
-{
-    return (idx - 1) / 2;
-}
-
-uint64_t bintree_sibling(uint64_t idx)
-{
-    return idx + ((idx & 1) ? 1 : -1);
-}
-
 /* Calculate the indicies of the complementary nodes to a
  * leaf. `leafidx' is 0 for the rightmost leaf node. This function
  * will return an array with a length equal to the number of levels in

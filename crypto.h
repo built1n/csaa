@@ -48,6 +48,18 @@ int *bintree_complement_ordersonly(uint64_t leafidx, int logleaves);
  * given leaf node. Will be ordered from nearest relative to root. */
 uint64_t *bintree_ancestors(uint64_t leafidx, int logleaves);
 
+/* Given a node's index, return the index of the parent in an array
+ * representation of a binary tree. */
+static inline uint64_t bintree_parent(uint64_t idx)
+{
+    return (idx - 1) / 2;
+}
+
+static inline uint64_t bintree_sibling(uint64_t idx)
+{
+    return idx + ((idx & 1) ? 1 : -1);
+}
+
 uint64_t bintree_parent(uint64_t idx);
 uint64_t bintree_sibling(uint64_t idx);
 
