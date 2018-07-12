@@ -709,12 +709,14 @@ static uint64_t find_empty_slot(struct service_provider *sp)
 
     int rc = sqlite3_step(st);
 
-    if(rc == SQLITE_ROW)
-    {
-        return sqlite3_column_int64(st, 0);
-    }
+    uint64_t slot = (uint64_t) -1;
 
-    return (uint64_t) -1;
+    if(rc == SQLITE_ROW)
+        slot = sqlite3_column_int64(st, 0);
+
+    sqlite3_finalize(st);
+
+    return slot;
 }
 
 struct tm_request sp_createfile(struct service_provider *sp,
