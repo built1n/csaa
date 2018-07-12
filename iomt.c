@@ -481,6 +481,8 @@ static void generate_and_clauses(const struct iomt *tree, char *buf)
         buf += sprintf(buf, " AND %s = ?2", tree->db.key2_name);
 }
 
+/* unused */
+#if 0
 static void generate_where_clause(const struct iomt *tree, char *buf)
 {
     buf[0] = '\0';
@@ -499,6 +501,7 @@ static void generate_where_clause(const struct iomt *tree, char *buf)
         }
     }
 }
+#endif
 
 /* returns one of the following:
    "" - no keys

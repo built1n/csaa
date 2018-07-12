@@ -496,6 +496,8 @@ static void insert_version(struct service_provider *sp,
     }
 }
 
+#if 0
+/* unused */
 static uint64_t count_versions(struct service_provider *sp,
                                uint64_t file_idx)
 {
@@ -511,8 +513,13 @@ static uint64_t count_versions(struct service_provider *sp,
     assert(sqlite3_step(st) == SQLITE_ROW);
 
     /* praying it works */
-    return sqlite3_column_int64(st, 0);
+    uint64_t count = sqlite3_column_int64(st, 0);
+
+    sqlite3_finalize(st);
+
+    return count;
 }
+#endif
 
 static struct file_version *lookup_version(struct service_provider *sp,
                                            uint64_t file_idx,
@@ -1287,19 +1294,21 @@ int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
     }
 }
 
+#if 0
 static hash_t test_sign_request(void *userdata, const struct tm_request *req)
 {
     const char *str = userdata;
     return hmac_sha256(req, sizeof(*req), str, strlen(str));
 }
+#endif
 
 void sp_test(void)
 {
     int logleaves = 4;
 
-    clock_t start = clock();
+    //clock_t start = clock();
     struct service_provider *sp = sp_new("a", 1, logleaves, "files", "csaatest.db", true);
-    clock_t stop = clock();
+    //clock_t stop = clock();
 
     check("Tree initialization", sp != NULL);
 #if 0
