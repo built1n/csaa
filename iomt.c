@@ -252,16 +252,14 @@ void restore_nodes(struct iomt *tree, const uint64_t *indices, const hash_t *val
 }
 
 /* Update mt_nodes to reflect a change to a leaf node's
- * value. Optionally, if old_dep is not NULL, *old_dep will be made to
- * point to an array of length mt_logleaves that contains the old node
- * values (whose indices are returned by bintree_ancestors()). NOTE:
- * this function will NOT set the corresponding IOMT leaf; use
- * iomt_update_leaf_full for that. */
-void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep)
+ * value. Optionally, if old_dep is not NULL, old_dep[] will be filled
+ * with array of length mt_logleaves that contains the old node values
+ * (whose indices can be found with bintree_ancestors()).
+ *
+ * NOTE: this function will NOT set the corresponding IOMT leaf; use
+ * iomt_update_leaf_* for that. */
+void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t *old_dep)
 {
-    if(old_dep)
-        *old_dep = calloc(tree->mt_logleaves, sizeof(hash_t));
-
     uint64_t idx = ((uint64_t)1 << tree->mt_logleaves) - 1 + leafidx;
 
     if(!tree->in_memory)
@@ -280,7 +278,7 @@ void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **
         /* TODO: optimize */
         /* save old value */
         if(old_dep)
-            (*old_dep)[i] = iomt_getnode(tree, idx);
+	    old_dep[i] = iomt_getnode(tree, idx);
 
         iomt_setnode(tree, idx, parent);
     }

@@ -67,7 +67,7 @@ hash_t *merkle_complement(const struct iomt *tree, uint64_t leafidx, int **order
 /* This function is prefixed merkle_ because it does not know about
  * any IOMT-specific properties (though it is still passed an iomt
  * struct) */
-void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t **old_dep);
+void merkle_update(struct iomt *tree, uint64_t leafidx, hash_t newval, hash_t *old_dep);
 
 struct iomt *iomt_new(int logleaves);
 struct iomt *iomt_new_from_db(void *db,

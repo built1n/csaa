@@ -110,8 +110,8 @@ struct tm_cert cert_eq(struct service_provider *sp,
                                              &nu1_hmac);
 
     /* We now update the ancestors of the encloser node. */
-    hash_t *old_depvalues;
-    merkle_update(sp->iomt, encloser_leafidx, h_encmod, &old_depvalues);
+    hash_t *old_depvalues = malloc(sizeof(hash_t) * sp->iomt->mt_logleaves);
+    merkle_update(sp->iomt, encloser_leafidx, h_encmod, old_depvalues);
 
     int *ins_orders;
     hash_t *ins_comp = merkle_complement(sp->iomt, placeholder_leafidx, &ins_orders);
