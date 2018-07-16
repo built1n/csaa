@@ -2,7 +2,7 @@
 
 rm -f all_*.txt dummy_all_*.txt
 
-for i in `seq 4 17`
+for i in `seq 4 20`
 do
     for j in `seq 1 5`
     do
