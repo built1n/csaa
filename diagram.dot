@@ -1,0 +1,56 @@
+digraph {
+concentrate=true;
+overlap=scale;
+splines=true;
+
+subgraph cluster_iomt {
+root [label=<&xi;>];
+
+node [shape = plaintext];
+
+node1 [label=< <table border="0" cellborder="1" cellspacing="0"> <tr> <td port="idx">IDX<sub>1</sub> </td> <td> CTR<sub>1</sub> </td> <td port="nextidx"> NEXT_IDX </td> </tr> </table> >];
+node2 [label=< <table border="0" cellborder="1" cellspacing="0"> <tr> <td port="idx">IDX<sub>2</sub> </td> <td> CTR<sub>2</sub> </td> <td port="nextidx"> NEXT_IDX </td> </tr> </table> >];
+noden [label=< <table border="0" cellborder="1" cellspacing="0"> <tr> <td port="idx">IDX<sub>n</sub> </td> <td> CTR<sub>n</sub> </td> <td port="nextidx"> NEXT_IDX </td> </tr> </table> >];
+
+root -> { node1, node2, noden };
+
+subgraph {
+rank=same;
+node1:nextidx -> node2:idx;
+node2:nextidx -> noden:idx;
+noden:nextidx -> node1:idx;
+}
+
+label="Main IOMT";
+}
+
+subgraph cluster_filerecords {
+node [shape = plaintext];
+
+table1 [
+label=<<table border="0" cellborder="1" cellspacing="0">
+<tr> <td>Index</td> <td>Counter</td> <td>Version</td> <td>FR Certificate</td> <td>Certificate HMAC</td> <td>ACL root</td> </tr>
+<tr> <td port="idx1">IDX<sub>1</sub></td> <td port="ctr1">CTR<sub>1</sub></td> <td>VER<sub>1</sub></td> <td>FRCert<sub>1</sub></td> <td>HMAC(FRCert<sub>1</sub>, &chi;)</td> <td>&alpha;<sub>1</sub></td></tr>
+<tr> <td port="idx2">IDX<sub>2</sub></td> <td port="ctr2">CTR<sub>2</sub></td> <td>VER<sub>2</sub></td> <td>FRCert<sub>2</sub></td> <td>HMAC(FRCert<sub>2</sub>, &chi;)</td> <td>&alpha;<sub>2</sub></td></tr>
+</table>>];
+
+label="FileRecords";
+}
+
+subgraph cluster_module {
+moduleroot [label=<IOMT root<br />&xi;>];
+modulesecret [label=<Module secret<br />&chi;>];
+userkeys[label=<Shared secrets<br /> &kappa;<sub>1</sub> ... &kappa;<sub>n</sub>>];
+
+label=<Trusted module <b>T</b>>;
+};
+
+/*
+node1:idx -> table1:idx1 [ ltail=cluster_iomt, lhead=cluster_filerecords ];
+
+node2:idx -> table1:idx2 [ ltail=cluster_iomt, lhead=cluster_filerecords ];
+
+root -> moduleroot [ltail=cluster_iomt, lhead=cluster_module];
+*/
+
+}
