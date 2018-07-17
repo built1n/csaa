@@ -9,16 +9,16 @@ using namespace std;
 
 /* post-process the output of tabulate.sh */
 /* input:
-   [x1] [y1_0]
-   [x1] [y1_1]
+   [x1] [y1_0] [div1_0]
+   [x1] [y1_1] [div1_1]
    ...
-   [x2] [y2_0]
-   [x2] [y2_1]
+   [x2] [y2_0] [div2_0]
+   [x2] [y2_1] [div2_1]
    ...
    [x] is an integer up to 100
 */
 /* output:
-   [x1] [average y1]/2^[x1] [stderr y1]
+   [x1] [average y1]/[div_n] [stderr y1]
 */
 
 static double values[100][100], sums[100], means[100], stddevs[100], stderrs[100];
@@ -31,9 +31,8 @@ int main()
     {
         int x;
         double y;
-        cin >> x >> y;
-
-        long long div = 1 << x;
+        unsigned long long div;
+        cin >> x >> y >> div;
 
         values[x][counts[x]] = y / div;
         sums[x] += values[x][counts[x]];
