@@ -1,12 +1,12 @@
 #!/bin/bash
-trials=1
-runs_test=10
+trials=2
+runs_test=500
 
 rm -f all_*.txt dummy_all_*.txt
 
-for i in `seq 4 10`
+for i in `seq 9 15`
 do
-    for j in `seq 1 1`
+    for j in `seq 1 $trials`
     do
         echo -n "$i $j " >> all_"$i".txt
 	echo -n "$i $j " >> dummy_all_"$i".txt
