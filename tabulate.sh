@@ -18,23 +18,25 @@ rm -f data_create.txt data_modify.txt data_retrieve.txt data_modifyenc.txt data_
 rm -f data_dummy_create.txt data_dummy_modify.txt data_dummy_retrieve.txt
 
 cat all_*.txt | awk '{
-if(NF >= 21)
-{
+if(NF >= 5)
  print $1, $5 >> "data_create.txt";
+if(NF >= 9)
  print $1, $9 >> "data_modify.txt"
+if(NF >= 13)
  print $1, $13 >> "data_retrieve.txt"
+if(NF >= 17)
  print $1, $17 >> "data_modifyenc.txt"
+if(NF >= 21)
  print $1, $21 >> "data_retrieveenc.txt"
-}
 }'
 
 cat dummy_all_*.txt | awk '{
-if(NF >= 13)
-{
+if(NF >= 5)
  print $1, $5 >> "data_dummy_create.txt";
+if(NF >= 9)
  print $1, $9 >> "data_dummy_modify.txt";
+if(NF >= 13)
  print $1, $13 >> "data_dummy_retrieve.txt";
-}
 }'
 
 for f in data*.txt
