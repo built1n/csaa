@@ -108,6 +108,9 @@ void commit_transaction(void *db);
 void *deserialize_file(int cl, size_t *len);
 void serialize_file(int cl, const void *buf, size_t len);
 
+void *load_file(const char *path, size_t *len);
+void write_file(const char *path, const void *contents, size_t len);
+
 void warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* self-test */

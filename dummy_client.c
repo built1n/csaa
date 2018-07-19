@@ -312,27 +312,6 @@ int connect_to_service(const char *sockpath)
     return fd;
 }
 
-void *load_file(const char *path, size_t *len)
-{
-    FILE *f = fopen(path, "r");
-    fseek(f, 0, SEEK_END);
-    *len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    void *buf = malloc(*len);
-    fread(buf, 1, *len, f);
-    return buf;
-}
-
-void write_file(const char *path, const void *contents, size_t len)
-{
-    if(contents)
-    {
-        FILE *f = fopen(path, "w");
-        fwrite(contents, 1, len, f);
-        fclose(f);
-    }
-}
-
 bool server_request(const char *sockpath,
                     uint64_t user_id,
                     struct user_request req,

@@ -26,6 +26,11 @@
 
 #define MAX_PATH 260
 
+/* define these to make the service provider prepopulate a database
+ * with 2^logleaves - RUNS_TEST files, then exit */
+#define PREPOPULATE
+#define RUNS_TEST 500
+
 /* free with free_version */
 struct file_version {
     uint64_t version;
@@ -652,6 +657,8 @@ struct tm_cert sp_request(struct service_provider *sp,
             ver.vr_cert = vr;
             ver.vr_hmac = vr_hmac;
 
+            /* don't do it for prepopulation, to save space */
+#ifndef PREPOPULATE
             /* write to disk */
             if(encrypted_contents)
                 write_contents(sp, fr.fr.idx, fr.fr.version, "",
@@ -664,6 +671,7 @@ struct tm_cert sp_request(struct service_provider *sp,
             if(composefile)
                 write_contents(sp, fr.fr.idx, fr.fr.version, "_cf",
                                composefile, composefile_len);
+#endif
 
             insert_version(sp, rec, &ver);
         }
@@ -687,10 +695,12 @@ struct tm_cert sp_request(struct service_provider *sp,
     if(vr_hmac_out)
         *vr_hmac_out = vr_hmac;
     if(ack_hmac_out)
+    {
         *ack_hmac_out = ack_hmac;
 
-    if(is_zero(*ack_hmac_out))
-        printf("Failed: %s\n", tm_geterror());
+        if(is_zero(*ack_hmac_out))
+            printf("Failed: %s\n", tm_geterror());
+    }
 
     return fr;
 }
@@ -1270,9 +1280,52 @@ void sp_save(void)
     }
 }
 
+/* hack to quickly prepopulate a database with 2^logleaves - RUNS_TEST files */
+static hash_t test_sign_request(void *userdata, const struct tm_request *req)
+{
+    const char *str = userdata;
+    return hmac_sha256(req, sizeof(*req), str, strlen(str));
+}
+
+static void sp_prepopulate(int logleaves, const char *dbpath)
+{
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath, true);
+
+    uint64_t n = (1 << logleaves) - RUNS_TEST;
+
+    const char *filename = "container1/hello-world.tar";
+    size_t file_len;
+
+    const void *file = load_file(filename, &file_len);
+
+    for(uint64_t i = 0; i < n; ++i)
+    {
+        sp_createfile(sp, 1, test_sign_request, "a", NULL);
+        sp_modifyfile(sp, 1, test_sign_request, "a", i + 1, hash_null, hash_null,
+                      file, file_len,
+                      NULL, 0,
+                      NULL, 0,
+                      NULL);
+    }
+
+    char state_out[1000];
+    snprintf(state_out, sizeof(state_out), "databases/state_%d", logleaves);
+
+    tm_savestate(sp->tm, state_out);
+
+    sp_free(sp);
+}
+
 int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
 {
 #define BACKLOG 10
+
+#ifdef PREPOPULATE
+    /* prepopulate only */
+    sp_prepopulate(logleaves, dbpath);
+
+    return 0;
+#endif
 
     if(listen(sockfd, BACKLOG) < 0)
     {
@@ -1299,14 +1352,6 @@ int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
         close(cl);
     }
 }
-
-#if 0
-static hash_t test_sign_request(void *userdata, const struct tm_request *req)
-{
-    const char *str = userdata;
-    return hmac_sha256(req, sizeof(*req), str, strlen(str));
-}
-#endif
 
 void sp_test(void)
 {
