@@ -9,7 +9,7 @@ dummy_main.o: main.c
 
 dummy_client: dummy_client.o crypto.o test.o iomt.o sqlinit.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
-dummy_server: dummy_service.o dummy_main.o sqlinit.o
+dummy_server: dummy_service.o dummy_main.o sqlinit.o crypto.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
 client: client.o crypto.o test.o iomt.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)

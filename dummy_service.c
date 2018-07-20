@@ -25,6 +25,9 @@
 #include "trusted_module.h"
 #include "service_provider.h"
 
+#define PREPOPULATE
+#define RUNS_TEST 500
+
 /* arbitrary */
 #define ACL_LOGLEAVES 4
 
@@ -136,18 +139,6 @@ void *db_init(const char *filename)
     }
     
     return db;
-}
-
-void begin_transaction(void *db)
-{
-    sqlite3 *handle = db;
-    sqlite3_exec(handle, "BEGIN;", 0, 0, 0);
-}
-
-void commit_transaction(void *db)
-{
-    sqlite3 *handle = db;
-    sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
 }
 
 /* leaf count will be 2^logleaves */
@@ -281,9 +272,11 @@ void sp_request(struct service_provider *sp,
     {
         rec->version++;
 
+#ifndef PREPOPULATE
         /* write to disk */
         write_contents(sp, req->idx, rec->version,
                        encrypted_contents, contents_len);
+#endif
     }
 
     if(need_insert)
@@ -476,9 +469,38 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     }
 }
 
+static void sp_prepopulate(int logleaves, const char *dbpath)
+{
+    struct service_provider *sp = sp_new("a", 1, logleaves, "files", dbpath);
+
+    uint64_t n = (1 << logleaves) - RUNS_TEST;
+
+    const char *filename = "container1/hello-world.tar";
+    size_t file_len;
+
+    const void *file = load_file(filename, &file_len);
+
+    for(uint64_t i = 0; i < n; ++i)
+    {
+        sp_createfile(sp, 1);
+        sp_modifyfile(sp, 1, i + 1,
+                      file, file_len);
+    }
+
+    sp_free(sp);
+}
+
 int sp_main(int sockfd, int logleaves, const char *dbpath, bool overwrite)
 {
     (void) overwrite;
+
+#ifdef PREPOPULATE
+    /* prepopulate only */
+    sp_prepopulate(logleaves, dbpath);
+
+    return 0;
+#endif
+
 #define BACKLOG 10
 
     if(listen(sockfd, BACKLOG) < 0)

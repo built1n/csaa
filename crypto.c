@@ -526,7 +526,7 @@ void write_file(const char *path, const void *contents, size_t len)
 
 void crypto_test(void)
 {
-#if 1
+#if 0
     int *orders;
     uint64_t *comp = bintree_complement(6, 4, &orders);
     uint64_t correct[] = { 22, 9, 3, 2 };
