@@ -1,7 +1,10 @@
 #!/bin/bash
-# modify files 1 - $2, creating a new version with fixed contents
+# modify files $3 - ($3 + 2), creating a new version with fixed contents
 echo "Modify:"
-for i in $(seq 1 $2)
+
+stop=$(echo "$3+$2" | bc)
+
+for i in $(seq $3 $stop)
 do
     $1 -u 1 -k a modifyfile -f $i -i container1/hello-world.tar > /dev/null
     if [[ $? -ne 0 ]]

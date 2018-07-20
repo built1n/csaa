@@ -1,6 +1,9 @@
 #!/bin/bash
 echo "Modify (encrypted):"
-for i in $(seq 1 $2)
+
+stop=$(echo "$3+$2" | bc)
+
+for i in $(seq $3 $stop)
 do
     $1 -u 1 -k a modifyfile -e -f $i -i container1/hello-world.tar > /dev/null
     if [[ $? -ne 0 ]]

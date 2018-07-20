@@ -4,7 +4,7 @@ runs_test=500
 
 rm -f all_*.txt dummy_all_*.txt
 
-for i in `seq 9 15`
+for i in `seq 10 12`
 do
     for j in `seq 1 $trials`
     do
@@ -23,7 +23,7 @@ cat all_*.txt | awk '{
 runs_create=lshift(1, $1);
 runs_test='$runs_test';
 if(NF >= 5)
- print $1, $5, runs_create >> "data_create.txt";
+ print $1, $5, runs_test >> "data_create.txt";
 if(NF >= 9)
  print $1, $9, runs_test >> "data_modify.txt"
 if(NF >= 13)
@@ -38,7 +38,7 @@ cat dummy_all_*.txt | awk '{
 runs_create=lshift(1, $1);
 runs_test='$runs_test';
 if(NF >= 5)
- print $1, $5, runs_create >> "data_dummy_create.txt";
+ print $1, $5, runs_test >> "data_dummy_create.txt";
 if(NF >= 9)
  print $1, $9, runs_test >> "data_dummy_modify.txt";
 if(NF >= 13)

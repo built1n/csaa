@@ -28,7 +28,7 @@
 
 /* define these to make the service provider prepopulate a database
  * with 2^logleaves - RUNS_TEST files, then exit */
-#define PREPOPULATE
+//#define PREPOPULATE
 #define RUNS_TEST 500
 
 /* free with free_version */

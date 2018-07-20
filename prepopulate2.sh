@@ -2,9 +2,14 @@
 
 mkdir -p databases
 
-for i in `seq 10 25`
+pids=""
+for i in `seq 10 12`
 do
     echo $i
     rm -f socket
-    ./server $i databases/csaa_$i.db > /dev/null
+    ./server $i databases/csaa_$i.db > /dev/null &
+
+    pids=$pids" "$!
 done
+
+wait $pids

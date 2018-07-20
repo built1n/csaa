@@ -15,11 +15,11 @@ rm files -rf
 pid=$!
 sleep .2
 /usr/bin/time -v ./testcreate.sh ./client $runs_create
-/usr/bin/time -v ./testmodify.sh ./client $runs_test
-/usr/bin/time -v ./testretrieve.sh ./client $runs_test
-/usr/bin/time -v ./testmodifyenc.sh ./client $runs_test
+/usr/bin/time -v ./testmodify.sh ./client $runs_test 1
+/usr/bin/time -v ./testretrieve.sh ./client $runs_test 1
+/usr/bin/time -v ./testmodifyenc.sh ./client $runs_test 1
 
 echo "Encrypted retrieve: "
-/usr/bin/time -v ./testretrieve.sh ./client $runs_test
+/usr/bin/time -v ./testretrieve.sh ./client $runs_test 1
 kill -SIGINT $!
 rm csaa.db

@@ -4,7 +4,7 @@ mkdir -p databases
 
 pids=""
 
-for i in `seq 10 25`
+for i in `seq 10 12`
 do
     echo $i
     rm -f socket

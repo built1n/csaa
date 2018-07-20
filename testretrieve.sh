@@ -1,7 +1,10 @@
 #!/bin/bash
-# retrieve files 1 - $2, outputting to `out'
+# retrieve files $3-($3+$2), outputting to `out'
 echo "Retrieve:"
-for i in $(seq 1 $2)
+
+stop=$(echo "$3+$2" | bc)
+
+for i in $(seq $3 $stop)
 do
     $1 -u 1 -k a retrievefile -f $i -o out > /dev/null
     if [[ $? -ne 0 ]]

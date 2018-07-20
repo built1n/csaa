@@ -25,7 +25,7 @@
 #include "trusted_module.h"
 #include "service_provider.h"
 
-#define PREPOPULATE
+//#define PREPOPULATE
 #define RUNS_TEST 500
 
 /* arbitrary */
