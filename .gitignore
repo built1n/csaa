@@ -3,3 +3,10 @@
 a.out
 server
 client
+files
+*.db
+module_state
+results*
+postprocess
+graph_*.eps
+databases
