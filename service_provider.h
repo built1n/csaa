@@ -4,6 +4,8 @@
 #ifndef CSAA_SERVICE_PROVIDER_H
 #define CSAA_SERVICE_PROVIDER_H
 
+#include <time.h>
+
 #include "crypto.h"
 #include "trusted_module.h"
 
@@ -66,7 +68,21 @@ struct user_request {
              * key (which the client can verify themselves) */
         } retrieve;
     };
+
+    bool profile; /* if true, service will send a server_profile
+                   * struct after the request response */
 } __attribute__((packed));
+
+#define MAX_TIMES 10
+#define MAX_LABEL 40
+
+/* this struct records a series of clock() times, and labels for them */
+struct server_profile {
+    clock_t times[MAX_TIMES];
+    char labels[MAX_TIMES][MAX_LABEL];
+
+    int n_times;
+};
 
 #ifndef CLIENT
 struct service_provider *sp_new(const void *key,

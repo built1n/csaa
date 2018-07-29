@@ -30,11 +30,12 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <assert.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <assert.h>
 
 static const char *socket_path = "socket";
 static const char *parse_args_fail = NULL;
@@ -42,7 +43,7 @@ static const char *userkey = NULL;
 static uint64_t user_id = 0;
 static struct user_request cl_request;
 static struct iomt *new_acl = NULL;
-const char *buildcode_path = NULL, *compose_path = NULL, *image_path = NULL, *file_key = NULL;
+static const char *buildcode_path = NULL, *compose_path = NULL, *image_path = NULL, *file_key = NULL;
 
 int compare_tuple(const void *p1, const void *p2)
 {
@@ -183,6 +184,10 @@ bool parse_args(int argc, char *argv[])
         {
             print_usage(argv[0]);
             exit(1);
+        }
+        else if(!strcmp(arg, "-p") || !strcmp(arg, "--profile"))
+        {
+            cl_request.profile = true;
         }
         else if(!strcmp(arg, "create"))
         {
@@ -356,7 +361,7 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req,
         return req_null;
     }
 
-    printf("Signing request\n");
+    //printf("Signing request\n");
     hash_t hmac = hmac_sha256(&tmr, sizeof(tmr), userkey, strlen(userkey));
     write(fd, &hmac, sizeof(hmac));
 
@@ -370,6 +375,13 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
         return false;
 
     return verify_ack(tmr, userkey, strlen(userkey), hmac);
+}
+
+/* hack to avoid copy-pasta below */
+static void read_profile(int fd, struct server_profile *profile_out)
+{
+    if(profile_out)
+        recv(fd, profile_out, sizeof(*profile_out), MSG_WAITALL);
 }
 
 /* In case of modifcation or file creation, returns true on successful
@@ -389,7 +401,8 @@ bool exec_request(int fd, const struct user_request *req,
                   void **composefile, size_t *cf_len_out,    /* RETRIEVE_FILE only */
                   hash_t *secret_out,                        /* RETRIEVE_FILE only */
                   void **file_contents_out,                  /* RETRIEVE_FILE only */
-                  size_t *file_len)                          /* RETRIEVE_FILE only */
+                  size_t *file_len,                          /* RETRIEVE_FILE only */
+                  struct server_profile *profile_out)        /* profile=true only */
 {
     write(fd, req, sizeof(*req));
     /* write additional data */
@@ -412,6 +425,8 @@ bool exec_request(int fd, const struct user_request *req,
     default:
         break;
     }
+
+    bool success = true;
 
     switch(req->type)
     {
@@ -438,7 +453,13 @@ bool exec_request(int fd, const struct user_request *req,
         struct tm_request tmr = verify_and_sign(fd, req, val);
         if(tmreq_out)
             *tmreq_out = tmr;
-        return verify_sp_ack(fd, &tmr);
+
+        success = verify_sp_ack(fd, &tmr);
+
+        if(req->profile)
+            read_profile(fd, profile_out);
+
+        break;
     }
     case RETRIEVE_INFO:
     {
@@ -458,10 +479,15 @@ bool exec_request(int fd, const struct user_request *req,
             }
 
             *verinfo_out = verinfo;
-            return true;
-        }
 
-        return false;
+            success = true;
+        }
+        else
+            success = false;
+
+        if(req->profile)
+            read_profile(fd, profile_out);
+        break;
     }
     case RETRIEVE_FILE:
     {
@@ -483,11 +509,18 @@ bool exec_request(int fd, const struct user_request *req,
         *buildcode = deserialize_file(fd, bc_len_out);
         *composefile = deserialize_file(fd, cf_len_out);
 
-        return *file_contents_out != NULL;
+        if(req->profile)
+            read_profile(fd, profile_out);
+
+        success = *file_contents_out != NULL;
+
+        break;
     }
     default:
         assert(false);
     }
+
+    return success;
 }
 
 /* set version = 0 to get latest version */
@@ -515,6 +548,7 @@ struct version_info request_verinfo(int fd, uint64_t user_id,
                            user_key, keylen,
                            NULL, NULL,
                            NULL, NULL,
+                           NULL,
                            NULL,
                            NULL,
                            NULL);
@@ -548,6 +582,25 @@ int connect_to_service(const char *sockpath)
     }
 
     return fd;
+}
+
+void prof_dump(struct server_profile *profile)
+{
+    //for(int i = 0; i < profile->n_times; ++i)
+    //fprintf(stderr, "%s ", profile->labels[i]);
+    //fprintf(stderr, "\n");
+
+    clock_t sum = 0;
+
+    /* TODO: use partial sums? */
+    for(int i = 0; i < profile->n_times; ++i)
+    {
+        fprintf(stderr, "%ld ", profile->times[i] - profile->times[i - 1]);
+
+        if(i > 0)
+            sum += profile->times[i] - profile->times[i - 1];
+    }
+    fprintf(stderr, "%ld\n", sum);
 }
 
 bool server_request(const char *sockpath,
@@ -620,6 +673,7 @@ bool server_request(const char *sockpath,
 
     struct version_info verinfo;
     struct tm_request tmreq;
+    struct server_profile profile;
 
     int fd = connect_to_service(sockpath);
 
@@ -641,7 +695,8 @@ bool server_request(const char *sockpath,
                                 req.type == RETRIEVE_FILE ? &cf_len : NULL,
                                 req.type == RETRIEVE_FILE ? &secret : NULL,
                                 req.type == RETRIEVE_FILE ? &file_contents : NULL,
-                                req.type == RETRIEVE_FILE ? &file_len : NULL);
+                                req.type == RETRIEVE_FILE ? &file_len : NULL,
+                                req.profile ? &profile : NULL);
 
     close(fd);
 
@@ -651,7 +706,7 @@ bool server_request(const char *sockpath,
            "\033[31;1mfailed\033[0m");
 
     if(!success)
-        return false;
+        return success;
 
     switch(req.type)
     {
@@ -699,7 +754,7 @@ bool server_request(const char *sockpath,
                                                       0);
         close(fd);
 
-        bool success = hash_equals(lambda, verinfo.lambda);
+        success = hash_equals(lambda, verinfo.lambda);
 
         if(!success)
         {
@@ -709,13 +764,19 @@ bool server_request(const char *sockpath,
         else
             printf("Successfully verifed integrity of file.\n");
 
-        return success;
+        break;
     }
     default:
         break;
     }
 
-    return true;
+    if(req.profile)
+    {
+        /* dump to stderr */
+        prof_dump(&profile);
+    }
+
+    return success;
 }
 
 int main(int argc, char *argv[]) {

@@ -69,6 +69,8 @@ struct service_provider {
 
     sqlite3_stmt *lookup_record, *insert_record, *update_record,
         *insert_version, *count_versions, *lookup_version, *find_empty;
+
+    struct server_profile profile;
 };
 
 /* Generate an EQ certificate for inserting a placeholder with index
@@ -405,9 +407,22 @@ void sp_free(struct service_provider *sp)
     }
 }
 
-/* TODO: pre-compile these statements */
+static void prof_reset(struct server_profile *prof)
+{
+    memset(prof, 0, sizeof(*prof));
+}
 
-/* linear search for record given idx */
+static void prof_add(struct server_profile *prof, const char *label)
+{
+    if(prof->n_times < MAX_TIMES)
+    {
+        prof->times[prof->n_times] = clock();
+        strcpy(prof->labels[prof->n_times], label);
+
+        prof->n_times++;
+    }
+}
+
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
     sqlite3_stmt *st = sp->lookup_record;
@@ -740,7 +755,11 @@ struct tm_request sp_createfile(struct service_provider *sp,
 
     if(sp->n_placeholders > 0)
     {
+        /* We already have a placeholder in the tree. Find it (this
+         * should only happen once in the lifetime of the IOMT, when
+         * it is first created). */
         i = find_empty_slot(sp);
+
         if(i == (uint64_t) -1)
         {
             assert(false); /* shouldn't happen */
@@ -786,6 +805,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
         sp->n_placeholders++;
     }
 
+    prof_add(&sp->profile, "finish_placeholder_insert");
+
     printf("Allocated leaf index %lu\n", i);
 
     int *file_orders;
@@ -808,6 +829,8 @@ struct tm_request sp_createfile(struct service_provider *sp,
     hash_t req_hmac = sign_request(userdata, &req);
     hash_t fr_hmac;
 
+    prof_add(&sp->profile, "finish_populate_request");
+
     struct tm_cert fr_cert = sp_request(sp,
                                         &req, req_hmac,
                                         &fr_hmac,
@@ -818,6 +841,9 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         NULL, 0,
                                         NULL, 0,
                                         acl);
+
+    prof_add(&sp->profile, "finish_exec_request");
+
     sp->n_placeholders--;
 
     /* sp_request() has made a copy of the ACL */
@@ -1144,6 +1170,12 @@ static void sp_handle_client(struct service_provider *sp, int cl)
 
     hash_t ack_hmac = hash_null;
 
+    if(user_req.profile)
+        prof_reset(&sp->profile);
+
+    /* logging is unconditional */
+    prof_add(&sp->profile, "start");
+
     switch(user_req.type)
     {
     case CREATE_FILE:
@@ -1266,6 +1298,11 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         exit(1);
     }
     }
+
+    prof_add(&sp->profile, "end");
+
+    if(user_req.profile)
+        write(cl, &sp->profile, sizeof(sp->profile));
 }
 
 /* will be called by main.c's signal handler to save the module's

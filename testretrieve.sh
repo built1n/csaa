@@ -6,7 +6,7 @@ stop=$(echo "$3+$2" | bc)
 
 for i in $(seq $3 $stop)
 do
-    $1 -u 1 -k a retrievefile -f $i -o out > /dev/null
+    $1 -u 1 -k a retrievefile -f $i -o out -p > /dev/null
     if [[ $? -ne 0 ]]
     then
         echo "Request failed!"
