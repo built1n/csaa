@@ -31,7 +31,7 @@ int main()
     {
         int x;
         double y;
-        unsigned long long div;
+        unsigned long long div = 1;
         cin >> x >> y >> div;
 
         values[x][counts[x]] = y / div;

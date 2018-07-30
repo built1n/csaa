@@ -1,7 +1,7 @@
 #!/usr/bin/gnuplot
 set xlabel "logleaves"
 set ylabel "avg time per operation (sec)"
-set yrange [0:]
+set yrange [0:.04]
 set style line 1 lc rgb '#0060ad' lt 1 lw 2 pt -1 ps 0
 set style line 3 pt -1 ps 0
 set terminal eps

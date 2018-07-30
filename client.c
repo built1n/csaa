@@ -593,14 +593,13 @@ void prof_dump(struct server_profile *profile)
     clock_t sum = 0;
 
     /* TODO: use partial sums? */
-    for(int i = 0; i < profile->n_times; ++i)
+    for(int i = 1; i < profile->n_times; ++i)
     {
         fprintf(stderr, "%ld ", profile->times[i] - profile->times[i - 1]);
 
-        if(i > 0)
-            sum += profile->times[i] - profile->times[i - 1];
+        sum += profile->times[i] - profile->times[i - 1];
     }
-    fprintf(stderr, "%ld\n", sum);
+    fprintf(stderr, "\n");
 }
 
 bool server_request(const char *sockpath,
