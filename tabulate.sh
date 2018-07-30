@@ -1,25 +1,25 @@
 #!/bin/bash
+logleaves_start=10
+logleaves_end=12
 trials=2
 runs_test=500
-create_times=4
-modify_times=1
-retrieve_times=1
 
 rm -f all_*.txt dummy_all_*.txt
 
-for i in `seq 10 12`
+for i in `seq $logleaves_start $logleaves_end`
 do
     for j in `seq 1 $trials`
     do
-        echo -n "$i $j " >> all_"$i".txt
 	echo -n "$i $j " >> dummy_all_"$i".txt
-
-        # 5 operations
+	
+        # 5 operations in each file
         for k in `seq 0 4`
         do
             start=$(expr $runs_test \* $k + 1)
             end=$(expr $runs_test \* \( $k + 1 \))
-            cat run_"$i"_"$j".txt | sed -n $start,$runs_test'p' | ../average.sh | awk '{printf($1" ");}' >> all_"$i".txt
+
+	    echo -n "$i " > rundata_"$i"_"$j"_"$k".txt
+            cat run_"$i"_"$j".txt | sed -n $start,$end'p' | ../average.sh | awk '{printf($1" ");}' >> rundata_"$i"_"$j"_"$k".txt
         done
         echo >> all_"$i".txt
 
@@ -27,31 +27,23 @@ do
     done
 done
 
-rm -f data_create.txt data_modify.txt data_retrieve.txt data_modifyenc.txt data_retrieveenc.txt
-rm -f data_dummy_create.txt data_dummy_modify.txt data_dummy_retrieve.txt
-
-cat all_*.txt | awk '{
- print $1, $3, $4, $5, $6 >> "data_create.txt";
- print $1, $7 >> "data_modify.txt"
- print $1, $8 >> "data_retrieve.txt"
- print $1, $9 >> "data_modifyenc.txt"
- print $1, $10 >> "data_retrieveenc.txt"
-}'
-
-cat dummy_all_*.txt | awk '{
-runs_create=lshift(1, $1);
-runs_test='$runs_test';
-if(NF >= 5)
- print $1, $5, runs_test >> "data_dummy_create.txt";
-if(NF >= 9)
- print $1, $9, runs_test >> "data_dummy_modify.txt";
-if(NF >= 13)
- print $1, $13, runs_test >> "data_dummy_retrieve.txt";
-}'
-
-for f in data*.txt
+# generate the data files
+for k in `seq 0 4`
 do
-    echo $f
-    cat $f | awk '{cmd = "echo " $2 " | ../timetosec.sh"; cmd | getline sec; print $1, sec, $3;}' > sec_$f
-    cat sec_$f | ../postprocess | sort -n > final_$f
+    rm -f "data_"$k"_"*.txt	    
+    for i in `seq $logleaves_start $logleaves_end`
+    do
+	for j in `seq 1 $trials`
+	do
+	    cat rundata_"$i"_"$j"_"$k".txt | awk '{for(i=2;i<=NF;i++) { print $1, $i >> "data_"'$k'"_"i - 1".txt";} }'
+	done
+    done
+done
+
+for k in `seq 0 4`
+do
+    for f in data_$k*
+    do
+	cat $f | ../postprocess > final_$f
+    done
 done

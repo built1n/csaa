@@ -16,6 +16,6 @@ client: client.o crypto.o test.o iomt.o
 server: service_provider.o crypto.o helper.o trusted_module.o main.o test.o iomt.o sqlinit.o
 	cc -o $@ $^ -lcrypto $(CFLAGS)
 postprocess: postprocess.cpp
-	c++ -o $@ $^
+	c++ -o $@ $^ $(CFLAGS)
 clean:
 	rm -f *.o a.out client server dummy_client dummy_server postprocess

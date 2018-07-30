@@ -1087,6 +1087,8 @@ void *sp_retrieve_file(struct service_provider *sp,
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
+    prof_add(&sp->profile, "finish_lookup");
+    
     if(!rec || !rec->version)
     {
         /* Newly created file, no contents. We don't bother to set
@@ -1101,6 +1103,7 @@ void *sp_retrieve_file(struct service_provider *sp,
         version = rec->version;
 
     struct file_version *ver = lookup_version(sp, file_idx, version);
+    prof_add(&sp->profile, "finish_lookupver");
 
     if(!ver)
     {
@@ -1113,6 +1116,8 @@ void *sp_retrieve_file(struct service_provider *sp,
     struct tm_cert rv1 = cert_rv_by_idx(sp->tm, sp->iomt, file_idx, &rv1_hmac);
     struct tm_cert rv2 = cert_rv_by_idx(sp->tm, rec->acl, user_id, &rv2_hmac);
 
+    prof_add(&sp->profile, "finish_rvcerts");
+    
     if(hash_to_u64(rv2.rv.val) < 1)
     {
         free_version(ver);
@@ -1130,6 +1135,7 @@ void *sp_retrieve_file(struct service_provider *sp,
                                &rec->fr_cert, rec->fr_hmac,
                                ver->encrypted_secret, ver->kf);
     }
+    prof_add(&sp->profile, "finish_retsec");
 
     if(kf)
         *kf = ver->kf;
