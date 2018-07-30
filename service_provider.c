@@ -73,6 +73,23 @@ struct service_provider {
     struct server_profile profile;
 };
 
+/* Profiling */
+static void prof_reset(struct server_profile *prof)
+{
+    memset(prof, 0, sizeof(*prof));
+}
+
+static void prof_add(struct server_profile *prof, const char *label)
+{
+    if(prof->n_times < MAX_TIMES)
+    {
+        prof->times[prof->n_times] = clock();
+        strcpy(prof->labels[prof->n_times], label);
+
+        prof->n_times++;
+    }
+}
+
 /* Generate an EQ certificate for inserting a placeholder with index
  * placeholder_idx, given an encloser (which must actually enclose
  * a). Note: this function will modify the *mt_nodes array to reflect
@@ -108,6 +125,8 @@ struct tm_cert cert_eq(struct service_provider *sp,
     int *enc_orders;
     hash_t *enc_comp = merkle_complement(sp->iomt, encloser_leafidx, &enc_orders);
 
+    prof_add(&sp->profile, "eq1");
+
     /* we need two NU certificates */
     hash_t nu1_hmac, nu2_hmac;
 
@@ -116,21 +135,27 @@ struct tm_cert cert_eq(struct service_provider *sp,
                                              enc_comp, enc_orders, sp->iomt->mt_logleaves,
                                              &nu1_hmac);
 
+    prof_add(&sp->profile, "eq2");
     /* We now update the ancestors of the encloser node. */
     hash_t *old_depvalues = malloc(sizeof(hash_t) * sp->iomt->mt_logleaves);
     merkle_update(sp->iomt, encloser_leafidx, h_encmod, old_depvalues);
+    prof_add(&sp->profile, "eq3");
 
     int *ins_orders;
     hash_t *ins_comp = merkle_complement(sp->iomt, placeholder_leafidx, &ins_orders);
+    prof_add(&sp->profile, "eq4");
 
     struct tm_cert nu2 = tm_cert_node_update(sp->tm,
                                              hash_null, h_ins,
                                              ins_comp, ins_orders, sp->iomt->mt_logleaves,
                                              &nu2_hmac);
+    
+    prof_add(&sp->profile, "eq5");
 
     /* restore the tree */
     uint64_t *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
+    prof_add(&sp->profile, "eq6");
 
     free(dep_indices);
     free(old_depvalues);
@@ -404,22 +429,6 @@ void sp_free(struct service_provider *sp)
 
         db_free(sp->db);
         free(sp);
-    }
-}
-
-static void prof_reset(struct server_profile *prof)
-{
-    memset(prof, 0, sizeof(*prof));
-}
-
-static void prof_add(struct server_profile *prof, const char *label)
-{
-    if(prof->n_times < MAX_TIMES)
-    {
-        prof->times[prof->n_times] = clock();
-        strcpy(prof->labels[prof->n_times], label);
-
-        prof->n_times++;
     }
 }
 
@@ -788,10 +797,14 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                     i - 1,
                                     i, i + 1,
                                     &hmac);
+
+	prof_add(&sp->profile, "finish_eqgen");
+	
         assert(eq.type == EQ);
 
         /* update previous leaf's index */
         iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
+	prof_add(&sp->profile, "finish_updateprev");
 
         /* next_idx is set to 1 to keep everything circularly linked;
          * in the next iteration it will be updated to point to the
@@ -799,8 +812,10 @@ struct tm_request sp_createfile(struct service_provider *sp,
         /* for random indices, recall the encloser's old next index,
          * and use that here */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
+	prof_add(&sp->profile, "finish_updatecur");
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
+	prof_add(&sp->profile, "finish_setroot");
 
         sp->n_placeholders++;
     }

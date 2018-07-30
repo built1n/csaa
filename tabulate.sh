@@ -1,6 +1,6 @@
 #!/bin/bash
 logleaves_start=10
-logleaves_end=12
+logleaves_end=24
 trials=2
 runs_test=500
 
@@ -16,6 +16,10 @@ do
         for k in `seq 0 4`
         do
             start=$(expr $runs_test \* $k + 1)
+	    if [[ $k -eq 0 ]]
+	    then
+		start=2 # discard first line (with preinserted placeholder)
+	    fi
             end=$(expr $runs_test \* \( $k + 1 \))
 
 	    echo -n "$i " > rundata_"$i"_"$j"_"$k".txt

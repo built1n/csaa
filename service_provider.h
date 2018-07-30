@@ -73,7 +73,7 @@ struct user_request {
                    * struct after the request response */
 } __attribute__((packed));
 
-#define MAX_TIMES 10
+#define MAX_TIMES 30
 #define MAX_LABEL 40
 
 /* this struct records a series of clock() times, and labels for them */
