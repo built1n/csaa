@@ -605,6 +605,8 @@ int connect_to_service(const char *sockpath)
     return fd;
 }
 
+/* The test scripts depend on the output of this function with -p set
+ * (labels = false, labels_only = false). Do not change! */
 void prof_dump(struct server_profile *profile, bool labels)
 {
     //for(int i = 0; i < profile->n_times; ++i)
@@ -620,10 +622,14 @@ void prof_dump(struct server_profile *profile, bool labels)
             fprintf(stderr, "%s%s", profile->labels[i], !labels_only ? " " : "\n");
 
         if(!labels_only)
-            fprintf(stderr, "%ld\n", profile->times[i] - profile->times[i - 1]);
+            fprintf(stderr, "%ld%c", profile->times[i] - profile->times[i - 1],
+                    (!labels && !labels_only) ? ' ' : '\n');
 
         sum += profile->times[i] - profile->times[i - 1];
     }
+
+    if(!labels && !labels_only)
+        fprintf(stderr, "\n");
 }
 
 bool server_request(const char *sockpath,

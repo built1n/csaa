@@ -946,6 +946,9 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 {
     /* modification */
     struct file_record *rec = lookup_record(sp, file_idx);
+
+    prof_add(&sp->profile, "FinishDBLookupRecord");
+
     if(!rec)
     {
         printf("Could not find file with index %lu\n", file_idx);
@@ -955,6 +958,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
     int *file_orders, *acl_orders;
     uint64_t file_leafidx;
     struct iomt_node file_node = iomt_find_leaf(sp->iomt, file_idx, &file_leafidx);
+
+    prof_add(&sp->profile, "FinishIOMTFindLeaf");
 
     if(!file_node.idx)
     {
@@ -966,16 +971,22 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                           file_leafidx,
                                           &file_orders);
 
+    prof_add(&sp->profile, "FinishComplementCalculation");
+
     uint64_t acl_leafidx;
     struct iomt_node acl_node = iomt_find_leaf(rec->acl, user_id, &acl_leafidx);
     hash_t *acl_comp = merkle_complement(rec->acl,
                                          acl_leafidx,
                                          &acl_orders);
 
+    prof_add(&sp->profile, "FinishACLComplementCalculation");
+
     hash_t gamma = sha256(encrypted_file, filelen);
     hash_t h_bc = buildcode ? sha256(buildcode, buildcode_len) : hash_null;
     hash_t h_cf = composefile ? sha256(composefile, composefile_len) : hash_null;
     hash_t lambda = calc_lambda(gamma, h_bc, h_cf, kf);
+
+    prof_add(&sp->profile, "FinishCalculateLambda");
 
     struct tm_request req = req_filemodify(sp->tm,
                                            &rec->fr_cert, rec->fr_hmac,
@@ -993,6 +1004,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
 
     hash_t req_hmac = sign_request(userdata, &req);
 
+    prof_add(&sp->profile, "FinishFillRequestStructure");
+
     struct tm_cert vr;
     hash_t vr_hmac, fr_hmac;
 
@@ -1008,6 +1021,8 @@ struct tm_request sp_modifyfile(struct service_provider *sp,
                                        buildcode, buildcode_len,
                                        composefile, composefile_len,
                                        NULL);
+
+    prof_add(&sp->profile, "FinishExecuteRequest");
 
     /* We return the request because that is how the module's
      * authentication is done. */
@@ -1102,7 +1117,7 @@ void *sp_retrieve_file(struct service_provider *sp,
 {
     struct file_record *rec = lookup_record(sp, file_idx);
 
-    prof_add(&sp->profile, "finish_lookup");
+    prof_add(&sp->profile, "FinishDBLookup");
     
     if(!rec || !rec->version)
     {
@@ -1118,7 +1133,7 @@ void *sp_retrieve_file(struct service_provider *sp,
         version = rec->version;
 
     struct file_version *ver = lookup_version(sp, file_idx, version);
-    prof_add(&sp->profile, "finish_lookupver");
+    prof_add(&sp->profile, "FinishDBLookupVersion");
 
     if(!ver)
     {
@@ -1131,7 +1146,7 @@ void *sp_retrieve_file(struct service_provider *sp,
     struct tm_cert rv1 = cert_rv_by_idx(sp->tm, sp->iomt, file_idx, &rv1_hmac);
     struct tm_cert rv2 = cert_rv_by_idx(sp->tm, rec->acl, user_id, &rv2_hmac);
 
-    prof_add(&sp->profile, "finish_rvcerts");
+    prof_add(&sp->profile, "FinishGenerateRVCerts");
     
     if(hash_to_u64(rv2.rv.val) < 1)
     {
@@ -1150,7 +1165,7 @@ void *sp_retrieve_file(struct service_provider *sp,
                                &rec->fr_cert, rec->fr_hmac,
                                ver->encrypted_secret, ver->kf);
     }
-    prof_add(&sp->profile, "finish_retsec");
+    prof_add(&sp->profile, "FinishRetrieveSecret");
 
     if(kf)
         *kf = ver->kf;
