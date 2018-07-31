@@ -125,7 +125,7 @@ struct tm_cert cert_eq(struct service_provider *sp,
     int *enc_orders;
     hash_t *enc_comp = merkle_complement(sp->iomt, encloser_leafidx, &enc_orders);
 
-    prof_add(&sp->profile, "eq1");
+    prof_add(&sp->profile, "EQGenComputeHashes");
 
     /* we need two NU certificates */
     hash_t nu1_hmac, nu2_hmac;
@@ -135,27 +135,27 @@ struct tm_cert cert_eq(struct service_provider *sp,
                                              enc_comp, enc_orders, sp->iomt->mt_logleaves,
                                              &nu1_hmac);
 
-    prof_add(&sp->profile, "eq2");
+    prof_add(&sp->profile, "EQGenNUGeneration1");
     /* We now update the ancestors of the encloser node. */
     hash_t *old_depvalues = malloc(sizeof(hash_t) * sp->iomt->mt_logleaves);
     merkle_update(sp->iomt, encloser_leafidx, h_encmod, old_depvalues);
-    prof_add(&sp->profile, "eq3");
+    prof_add(&sp->profile, "EQGenEncloserInsert");
 
     int *ins_orders;
     hash_t *ins_comp = merkle_complement(sp->iomt, placeholder_leafidx, &ins_orders);
-    prof_add(&sp->profile, "eq4");
+    prof_add(&sp->profile, "EQGenComplementCalculation");
 
     struct tm_cert nu2 = tm_cert_node_update(sp->tm,
                                              hash_null, h_ins,
                                              ins_comp, ins_orders, sp->iomt->mt_logleaves,
                                              &nu2_hmac);
     
-    prof_add(&sp->profile, "eq5");
+    prof_add(&sp->profile, "EQGenNUGeneration2");
 
     /* restore the tree */
     uint64_t *dep_indices = bintree_ancestors(encloser_leafidx, sp->iomt->mt_logleaves);
     restore_nodes(sp->iomt, dep_indices, old_depvalues, sp->iomt->mt_logleaves);
-    prof_add(&sp->profile, "eq6");
+    prof_add(&sp->profile, "EQGenRestoreTree");
 
     free(dep_indices);
     free(old_depvalues);
@@ -798,13 +798,13 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                     i, i + 1,
                                     &hmac);
 
-	prof_add(&sp->profile, "finish_eqgen");
+	prof_add(&sp->profile, "FinishEQGen");
 	
         assert(eq.type == EQ);
 
         /* update previous leaf's index */
         iomt_update_leaf_nextidx(sp->iomt, i - 1, i + 1);
-	prof_add(&sp->profile, "finish_updateprev");
+	prof_add(&sp->profile, "UpdatePrevLeaf");
 
         /* next_idx is set to 1 to keep everything circularly linked;
          * in the next iteration it will be updated to point to the
@@ -812,15 +812,15 @@ struct tm_request sp_createfile(struct service_provider *sp,
         /* for random indices, recall the encloser's old next index,
          * and use that here */
         iomt_update_leaf_full(sp->iomt, i, i + 1, 1, hash_null);
-	prof_add(&sp->profile, "finish_updatecur");
+	prof_add(&sp->profile, "UpdateNewLeaf");
 
         assert(tm_set_equiv_root(sp->tm, &eq, hmac));
-	prof_add(&sp->profile, "finish_setroot");
+	prof_add(&sp->profile, "RootTransition");
 
         sp->n_placeholders++;
     }
 
-    prof_add(&sp->profile, "finish_placeholder_insert");
+    prof_add(&sp->profile, "FinishPlaceholderInsert");
 
     printf("Allocated leaf index %lu\n", i);
 
@@ -844,7 +844,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
     hash_t req_hmac = sign_request(userdata, &req);
     hash_t fr_hmac;
 
-    prof_add(&sp->profile, "finish_populate_request");
+    prof_add(&sp->profile, "FinishFillRequest");
 
     struct tm_cert fr_cert = sp_request(sp,
                                         &req, req_hmac,
@@ -857,7 +857,7 @@ struct tm_request sp_createfile(struct service_provider *sp,
                                         NULL, 0,
                                         acl);
 
-    prof_add(&sp->profile, "finish_exec_request");
+    prof_add(&sp->profile, "FinishExecutingRequest");
 
     sp->n_placeholders--;
 

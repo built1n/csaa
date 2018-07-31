@@ -52,7 +52,7 @@ int main()
                 var += del * del;
             }
 
-            if(counts[i] == 0)
+            if(counts[i] <= 1)
                 stddevs[i] = 0;
             else
                 stddevs[i] = sqrt(var / (counts[i] - 1));

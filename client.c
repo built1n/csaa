@@ -18,6 +18,18 @@
  *   retrieveinfo -f FILEIDX [-v VERSION]
  *
  *   retrievefile -f FILEIDX [-v VERSION] -o IMAGE_OUT
+ *
+ * The following options can be used to alter the client's behavior
+ * with any command:
+ *
+ *   -p, --profile
+ *     request a performance profile from the server
+ *
+ *   -l, --labels
+ *     print profile labels as well (use with -p)
+ *
+ *   --labels-only
+ *     print only profile labels (use with -p)
  */
 
 #define CLIENT
@@ -44,6 +56,7 @@ static uint64_t user_id = 0;
 static struct user_request cl_request;
 static struct iomt *new_acl = NULL;
 static const char *buildcode_path = NULL, *compose_path = NULL, *image_path = NULL, *file_key = NULL;
+static bool labels = false, labels_only = false;
 
 int compare_tuple(const void *p1, const void *p2)
 {
@@ -188,6 +201,14 @@ bool parse_args(int argc, char *argv[])
         else if(!strcmp(arg, "-p") || !strcmp(arg, "--profile"))
         {
             cl_request.profile = true;
+        }
+        else if(!strcmp(arg, "-l") || !strcmp(arg, "--labels"))
+        {
+            labels = true;
+        }
+        else if(!strcmp(arg, "--labels-only"))
+        {
+            labels_only = true;
         }
         else if(!strcmp(arg, "create"))
         {
@@ -584,7 +605,7 @@ int connect_to_service(const char *sockpath)
     return fd;
 }
 
-void prof_dump(struct server_profile *profile)
+void prof_dump(struct server_profile *profile, bool labels)
 {
     //for(int i = 0; i < profile->n_times; ++i)
     //fprintf(stderr, "%s ", profile->labels[i]);
@@ -595,11 +616,14 @@ void prof_dump(struct server_profile *profile)
     /* TODO: use partial sums? */
     for(int i = 1; i < profile->n_times; ++i)
     {
-        fprintf(stderr, "%ld ", profile->times[i] - profile->times[i - 1]);
+        if(labels || labels_only)
+            fprintf(stderr, "%s%s", profile->labels[i], !labels_only ? " " : "\n");
+
+        if(!labels_only)
+            fprintf(stderr, "%ld\n", profile->times[i] - profile->times[i - 1]);
 
         sum += profile->times[i] - profile->times[i - 1];
     }
-    fprintf(stderr, "\n");
 }
 
 bool server_request(const char *sockpath,
@@ -772,7 +796,7 @@ bool server_request(const char *sockpath,
     if(req.profile)
     {
         /* dump to stderr */
-        prof_dump(&profile);
+        prof_dump(&profile, labels);
     }
 
     return success;

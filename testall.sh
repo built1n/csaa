@@ -6,7 +6,7 @@ then
 fi
 
 runs_create=$2
-runs_test=$3
+runs_test=$(echo "$3 - 1" | bc)
 
 echo "Initializing..."
 rm files -rf

@@ -4,7 +4,7 @@ trials=1
 runs_test=500
 
 # minimum is ceil(lg(runs_test)), otherwise modify will fail
-for i in `seq 10 25`
+for i in `seq 10 12`
 do
     echo "logleaves "$i
 
