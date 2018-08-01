@@ -1,7 +1,14 @@
 #!/bin/bash
-logleaves_start=10
-logleaves_end=25
-trials=1
+if [[ $# -ne 3 ]]
+then
+    echo "Usage: "$0" START END TRIALS"
+    exit 1
+fi
+
+logleaves_start=$1
+logleaves_end=$2
+trials=$3
+
 runs_test=500
 
 rm -f all_*.txt dummy_all_*.txt

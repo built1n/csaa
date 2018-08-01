@@ -1,12 +1,22 @@
 #!/bin/bash
-mkdir -p results
-trials=1
+if [[ $# -ne 3 ]]
+then
+    echo "Usage: "$0" START END TRIALS"
+    exit 1
+fi
+
+logleaves_start=$1
+logleaves_end=$2
+trials=$3
+
 runs_test=500
+
+mkdir -p results
 
 # minimum is ceil(lg(runs_test)), otherwise modify will fail
 for j in $(seq 1 $trials)
 do
-    for i in `seq 10 12`
+    for i in `seq $logleaves_start $logleaves_end`
     do
         echo "logleaves "$i
 
