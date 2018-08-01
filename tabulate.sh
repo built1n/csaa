@@ -1,6 +1,6 @@
 #!/bin/bash
 logleaves_start=10
-logleaves_end=12
+logleaves_end=25
 trials=1
 runs_test=500
 
