@@ -2,7 +2,7 @@
 # retrieve files $3-($3+$2), outputting to `out'
 echo "Retrieve:"
 
-stop=$(echo "$3+$2" | bc)
+stop=$(echo "$3+$2-1" | bc)
 
 for i in $(seq $3 $stop)
 do

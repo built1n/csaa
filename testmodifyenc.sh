@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Modify (encrypted):"
 
-stop=$(echo "$3+$2" | bc)
+stop=$(echo "$3+$2-1" | bc)
 
 for i in $(seq $3 $stop)
 do
