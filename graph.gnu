@@ -6,7 +6,7 @@ set yrange [0:2000]
 set style line 1 lc rgb '#0060ad' lt 1 lw 2 pt -1 ps 0
 set style line 3 pt -1 ps 0
 
-set terminal eps size 6in,6in font "Times New Roman"
+set terminal eps size 6in,6in font "LiberationSerif"
 
 create_times = "`wc -l labels_0_create.txt`"
 modify_times = "`wc -l labels_1_modify.txt`"
