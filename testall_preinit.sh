@@ -16,7 +16,7 @@ cp databases/state_$logleaves module_state
 
 chmod 644 csaa.db module_state
 
-start_id=$(echo "2^$1 - $runs_test" | bc)
+start_id=$(echo "2^$1 - $runs_test + 1" | bc)
 
 ./server $1 csaa.db > /dev/null &
 pid=$!
