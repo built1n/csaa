@@ -52,20 +52,20 @@ Edit `service_provider.c` and `dummy_service.c` to uncomment the
 ```
 
 This should populate the `databases` directory with prepopulated
-databases and module states.
+databases and module states. This step only needs to be done once; the
+generated databases can be re-used as needed.
 
 #### Running Tests
 
-Edit `testmain_preinit.sh` to specify the desired logleaves range and
-number of trials.
-
-Then run:
+Run `testmain_preinit.sh` with the desired logleaves range and number
+of trials as its command-line arguments. For example, the following
+will run logleaves 10-25 with 5 trials for each logleaves value:
 
 ```
-./testmain_preinit.sh
+./testmain_preinit.sh 10 25 5
 ```
 
-This will produce results in the `results` directory.
+This script will produce results in the `results` directory.
 
 #### Producing Graphs
 
@@ -73,15 +73,18 @@ Run:
 
 ```
 cd results
-../tabulate.sh
+../tabulate.sh 10 25 5
 ```
 
 Your working directory must be in the `results` directory for this to
-work. This will produce many files with the prefix `final_` in the
+work. The arguments to `tabulate.sh` must be exactly the same as those
+passed to `testmain_preinit.sh`.
+
+This step will produce many files with the prefix `final_` in the
 `results` directory.
 
-To use GnuPlot to produce graphs from these, change to the project
-root directory, and run:
+To use Gnuplot to produce graphs from these, change to the project
+root directory and run:
 
 ```
 ./genlabels.sh
