@@ -45,6 +45,8 @@ struct service_provider {
     void *db; /* sqlite3 handle */
 
     sqlite3_stmt *lookup_record, *insert_record, *update_record, *max_record;
+
+    struct server_profile profile;
 };
 
 /* write to file data_dir/file_idx/version */
@@ -178,7 +180,6 @@ void sp_free(struct service_provider *sp)
     }
 }
 
-/* linear search for record given idx */
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
     sqlite3_stmt *st = sp->lookup_record;
@@ -200,10 +201,6 @@ static struct file_record *lookup_record(struct service_provider *sp, uint64_t i
     return NULL;
 }
 
-/* Should we insert sorted (for O(logn) lookup), or just at the end to
- * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
- * be replaced with a SQL backend.  We do not check to ensure that
- * there are no duplicate file indices; that is up to the caller. */
 static void insert_record(struct service_provider *sp, const struct file_record *rec)
 {
     sqlite3_stmt *st = sp->insert_record;
@@ -409,6 +406,12 @@ static void sp_handle_client(struct service_provider *sp, int cl)
     if(recv(cl, &user_req, sizeof(user_req), MSG_WAITALL) != sizeof(user_req))
         return;
 
+    if(user_req.profile)
+        prof_reset(&sp->profile);
+
+    /* logging is unconditional */
+    prof_add(&sp->profile, "start");
+    
     switch(user_req.type)
     {
     case CREATE_FILE:
@@ -467,6 +470,11 @@ static void sp_handle_client(struct service_provider *sp, int cl)
         exit(1);
     }
     }
+    
+    prof_add(&sp->profile, "end");
+
+    if(user_req.profile)
+        write(cl, &sp->profile, sizeof(sp->profile));
 }
 
 static void sp_prepopulate(int logleaves, const char *dbpath)

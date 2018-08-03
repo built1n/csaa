@@ -73,17 +73,6 @@ struct user_request {
                    * struct after the request response */
 } __attribute__((packed));
 
-#define MAX_TIMES 30
-#define MAX_LABEL 40
-
-/* this struct records a series of clock() times, and labels for them */
-struct server_profile {
-    clock_t times[MAX_TIMES];
-    char labels[MAX_TIMES][MAX_LABEL];
-
-    int n_times;
-};
-
 #ifndef CLIENT
 struct service_provider *sp_new(const void *key,
                                 size_t keylen,

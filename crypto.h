@@ -3,11 +3,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 struct tm_request;
 struct version_info;
 
-/* Various useful cryptographic functions; shared between TM and SP. */
+/* Various useful cryptographic functions; shared between TM and SP.
+ * This has also grown to include some decidely non-cryptographic
+ * functions, namely profiling code and file I/O helpers, which are
+ * shared with the client code as well. */
 
 /* we use SHA256 for h() */
 typedef struct hash_t {
@@ -112,6 +116,24 @@ void *load_file(const char *path, size_t *len);
 void write_file(const char *path, const void *contents, size_t len);
 
 void warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* profiling */
+
+#define MAX_TIMES 30
+#define MAX_LABEL 40
+
+/* this struct records a series of clock() times, and labels for them */
+struct server_profile {
+    clock_t times[MAX_TIMES];
+    char labels[MAX_TIMES][MAX_LABEL];
+
+    int n_times;
+};
+
+void prof_reset(struct server_profile *prof);
+void prof_add(struct server_profile *prof, const char *label);
+void prof_dump(struct server_profile *profile, bool labels, bool labels_only);
+void prof_read(int fd, struct server_profile *profile_out);
 
 /* self-test */
 void crypto_test(void);

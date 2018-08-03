@@ -524,6 +524,56 @@ void write_file(const char *path, const void *contents, size_t len)
     }
 }
 
+/* Profiling */
+void prof_reset(struct server_profile *prof)
+{
+    memset(prof, 0, sizeof(*prof));
+}
+
+void prof_add(struct server_profile *prof, const char *label)
+{
+    if(prof->n_times < MAX_TIMES)
+    {
+        prof->times[prof->n_times] = clock();
+        strcpy(prof->labels[prof->n_times], label);
+
+        prof->n_times++;
+    }
+}
+
+/* The test scripts depend on the output of this function with -p set
+ * (labels = false, labels_only = false). Do not change! */
+void prof_dump(struct server_profile *profile, bool labels, bool labels_only)
+{
+    //for(int i = 0; i < profile->n_times; ++i)
+    //fprintf(stderr, "%s ", profile->labels[i]);
+    //fprintf(stderr, "\n");
+
+    clock_t sum = 0;
+
+    /* TODO: use partial sums? */
+    for(int i = 1; i < profile->n_times; ++i)
+    {
+        if(labels || labels_only)
+            fprintf(stderr, "%s%s", profile->labels[i], !labels_only ? " " : "\n");
+
+        if(!labels_only)
+            fprintf(stderr, "%ld%c", profile->times[i] - profile->times[i - 1],
+                    (!labels && !labels_only) ? ' ' : '\n');
+
+        sum += profile->times[i] - profile->times[i - 1];
+    }
+
+    if(!labels && !labels_only)
+        fprintf(stderr, "\n");
+}
+
+void prof_read(int fd, struct server_profile *profile_out)
+{
+    if(profile_out)
+        recv(fd, profile_out, sizeof(*profile_out), MSG_WAITALL);
+}
+
 void crypto_test(void)
 {
 #if 0

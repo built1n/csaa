@@ -20,9 +20,9 @@ start_id=$(echo "2^$1 - $runs_test + 1" | bc)
 
 pid=$!
 sleep .2
-/usr/bin/time -v ./testcreate.sh ./dummy_client $runs_test
-/usr/bin/time -v ./testmodify.sh ./dummy_client $runs_test $start_id
-/usr/bin/time -v ./testretrieve.sh ./dummy_client $runs_test $start_id
+./testcreate.sh ./dummy_client $runs_test
+./testmodify.sh ./dummy_client $runs_test $start_id
+./testretrieve.sh ./dummy_client $runs_test $start_id
 
 kill -SIGINT $!
 

@@ -35,6 +35,7 @@ static const char *parse_args_fail = NULL;
 static uint64_t user_id = 0;
 static struct user_request cl_request;
 const char *image_path = NULL;
+static bool labels = false, labels_only = false;
 
 void print_usage(const char *name)
 {
@@ -113,6 +114,18 @@ bool parse_args(int argc, char *argv[])
         {
             print_usage(argv[0]);
             exit(1);
+        }
+        else if(!strcmp(arg, "-p") || !strcmp(arg, "--profile"))
+        {
+            cl_request.profile = true;
+        }
+        else if(!strcmp(arg, "-l") || !strcmp(arg, "--labels"))
+        {
+            labels = true;
+        }
+        else if(!strcmp(arg, "--labels-only"))
+        {
+            labels_only = true;
         }
         else if(!strcmp(arg, "create"))
         {
@@ -201,7 +214,8 @@ bool exec_request(int fd, const struct user_request *req,
                   struct version_info *verinfo_out,          /* RETRIEVE_INFO only */
                   void **file_contents_out,                  /* RETRIEVE_FILE only */
                   size_t *file_len,                          /* RETRIEVE_FILE only */
-                  uint64_t *new_idx)                         /* CREATE_FILE only */
+                  uint64_t *new_idx,                         /* CREATE_FILE only */
+		  struct server_profile *profile_out)        /* profile=true only */
 {
     write(fd, req, sizeof(*req));
     /* write additional data */
@@ -220,18 +234,27 @@ bool exec_request(int fd, const struct user_request *req,
         break;
     }
 
+    /* server now processes request */
+    
     switch(req->type)
     {
     case CREATE_FILE:
     {
         if(new_idx)
             recv(fd, new_idx, sizeof(*new_idx), MSG_WAITALL);
+	
+        if(req->profile)
+            prof_read(fd, profile_out);
+	
         return true;
     }
     case MODIFY_ACL:
     case MODIFY_FILE:
     {
         /* don't verify */
+        if(req->profile)
+            prof_read(fd, profile_out);
+
         return true;
     }
     case RETRIEVE_INFO:
@@ -239,22 +262,18 @@ bool exec_request(int fd, const struct user_request *req,
         struct version_info verinfo;
         recv(fd, &verinfo, sizeof(verinfo), MSG_WAITALL);
         *verinfo_out = verinfo;
+        if(req->profile)
+            prof_read(fd, profile_out);
+
         return true;
     }
     case RETRIEVE_FILE:
     {
-        recv(fd, file_len, sizeof(*file_len), MSG_WAITALL);
+        *file_contents_out = deserialize_file(fd, file_len);
 
-        if(*file_len)
-        {
-            *file_contents_out = malloc(*file_len);
-            recv(fd, *file_contents_out, *file_len, MSG_WAITALL);
-        }
-        else
-        {
-            *file_contents_out = NULL;
-            return false;
-        }
+        if(req->profile)
+            prof_read(fd, profile_out);
+
         return true;
     }
     default:
@@ -280,7 +299,8 @@ struct version_info request_verinfo(int fd, uint64_t user_id,
                  &verinfo,
                  NULL,
                  NULL,
-                 NULL);
+                 NULL,
+		 NULL);
 
     return verinfo;
 }
@@ -332,6 +352,7 @@ bool server_request(const char *sockpath,
     }
 
     struct version_info verinfo;
+    struct server_profile profile;
 
     int fd = connect_to_service(sockpath);
     uint64_t new_idx;
@@ -342,7 +363,8 @@ bool server_request(const char *sockpath,
                                 req.type == RETRIEVE_INFO ? &verinfo : NULL,
                                 req.type == RETRIEVE_FILE ? &file_contents : NULL,
                                 req.type == RETRIEVE_FILE ? &file_len : NULL,
-                                req.type == CREATE_FILE ? &new_idx : NULL);
+                                req.type == CREATE_FILE ? &new_idx : NULL,
+				req.profile ? &profile : NULL);
 
     printf("Request %s\n",
            success ?
@@ -370,6 +392,12 @@ bool server_request(const char *sockpath,
     }
     default:
         break;
+    }
+    
+    if(req.profile)
+    {
+        /* dump to stderr */
+        prof_dump(&profile, labels, labels_only);
     }
 
     return true;

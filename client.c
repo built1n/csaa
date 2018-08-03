@@ -398,13 +398,6 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
     return verify_ack(tmr, userkey, strlen(userkey), hmac);
 }
 
-/* hack to avoid copy-pasta below */
-static void read_profile(int fd, struct server_profile *profile_out)
-{
-    if(profile_out)
-        recv(fd, profile_out, sizeof(*profile_out), MSG_WAITALL);
-}
-
 /* In case of modifcation or file creation, returns true on successful
  * completion of request, as acknowledged by module. In case of info
  * retrieval, returns true if version info is verified by module. The
@@ -478,7 +471,7 @@ bool exec_request(int fd, const struct user_request *req,
         success = verify_sp_ack(fd, &tmr);
 
         if(req->profile)
-            read_profile(fd, profile_out);
+            prof_read(fd, profile_out);
 
         break;
     }
@@ -507,7 +500,7 @@ bool exec_request(int fd, const struct user_request *req,
             success = false;
 
         if(req->profile)
-            read_profile(fd, profile_out);
+            prof_read(fd, profile_out);
         break;
     }
     case RETRIEVE_FILE:
@@ -531,7 +524,7 @@ bool exec_request(int fd, const struct user_request *req,
         *composefile = deserialize_file(fd, cf_len_out);
 
         if(req->profile)
-            read_profile(fd, profile_out);
+            prof_read(fd, profile_out);
 
         success = *file_contents_out != NULL;
 
@@ -603,33 +596,6 @@ int connect_to_service(const char *sockpath)
     }
 
     return fd;
-}
-
-/* The test scripts depend on the output of this function with -p set
- * (labels = false, labels_only = false). Do not change! */
-void prof_dump(struct server_profile *profile, bool labels)
-{
-    //for(int i = 0; i < profile->n_times; ++i)
-    //fprintf(stderr, "%s ", profile->labels[i]);
-    //fprintf(stderr, "\n");
-
-    clock_t sum = 0;
-
-    /* TODO: use partial sums? */
-    for(int i = 1; i < profile->n_times; ++i)
-    {
-        if(labels || labels_only)
-            fprintf(stderr, "%s%s", profile->labels[i], !labels_only ? " " : "\n");
-
-        if(!labels_only)
-            fprintf(stderr, "%ld%c", profile->times[i] - profile->times[i - 1],
-                    (!labels && !labels_only) ? ' ' : '\n');
-
-        sum += profile->times[i] - profile->times[i - 1];
-    }
-
-    if(!labels && !labels_only)
-        fprintf(stderr, "\n");
 }
 
 bool server_request(const char *sockpath,
@@ -802,7 +768,7 @@ bool server_request(const char *sockpath,
     if(req.profile)
     {
         /* dump to stderr */
-        prof_dump(&profile, labels);
+        prof_dump(&profile, labels, labels_only);
     }
 
     return success;

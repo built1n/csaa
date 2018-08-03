@@ -73,23 +73,6 @@ struct service_provider {
     struct server_profile profile;
 };
 
-/* Profiling */
-static void prof_reset(struct server_profile *prof)
-{
-    memset(prof, 0, sizeof(*prof));
-}
-
-static void prof_add(struct server_profile *prof, const char *label)
-{
-    if(prof->n_times < MAX_TIMES)
-    {
-        prof->times[prof->n_times] = clock();
-        strcpy(prof->labels[prof->n_times], label);
-
-        prof->n_times++;
-    }
-}
-
 /* Generate an EQ certificate for inserting a placeholder with index
  * placeholder_idx, given an encloser (which must actually enclose
  * a). Note: this function will modify the *mt_nodes array to reflect
@@ -432,6 +415,8 @@ void sp_free(struct service_provider *sp)
     }
 }
 
+/* DB lookup. Copies result into a dynamically allocated structure
+   that should be freed with free_record() */
 static struct file_record *lookup_record(struct service_provider *sp, uint64_t idx)
 {
     sqlite3_stmt *st = sp->lookup_record;
@@ -481,10 +466,7 @@ static void insert_record(struct service_provider *sp, const struct file_record 
     assert(sqlite3_step(st) == SQLITE_DONE);
 }
 
-/* Should we insert sorted (for O(logn) lookup), or just at the end to
- * avoid copying (O(n) lookup, O(1) insertion)? Eventually this will
- * be replaced with a SQL backend.  We do not check to ensure that
- * there are no duplicate file indices; that is up to the caller. */
+/* This *might* not be O(log n) time. TODO: check this. */
 static void update_record(struct service_provider *sp,
                           const struct file_record *rec)
 {
@@ -581,8 +563,8 @@ static struct file_version *lookup_version(struct service_provider *sp,
     return NULL;
 }
 
-/* This does the majority of the work that actually modifies or
- * creates a file. It expects a filled and signed tm_request
+/* This function does the majority of the work that actually modifies
+ * or creates a file. It expects a filled and signed tm_request
  * structure, req, and will return the resulting FR certificate and
  * its signature in *hmac_out. Additionally, the module's
  * authenticated acknowledgement (equal to HMAC(req | 0), where |
