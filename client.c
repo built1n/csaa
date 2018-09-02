@@ -1,4 +1,4 @@
-/* Based on:
+/* Originally based on:
  * <https://github.com/troydhanson/network/blob/master/unixdomain/01.basic/cli.c> */
 
 /* Usage:
@@ -329,8 +329,11 @@ bool parse_args(int argc, char *argv[])
     }
 }
 
-/* val is lambda for FILE_UPDATE, ignored for create, and the ACL root for ACL_MODIFY */
-static struct tm_request verify_and_sign(int fd, const struct user_request *req, hash_t val)
+/* val is lambda for FILE_UPDATE (ignored for create), or the ACL root for ACL_MODIFY */
+/* old_verinfo is the old version info retrieved from the server (used
+ * for checking validity of counters in request) */
+static struct tm_request verify_and_sign(int fd, const struct user_request *req, hash_t val,
+                                         const struct version_info *old_verinfo)
 {
     struct tm_request tmr = req_null;
     if(recv(fd, &tmr, sizeof(tmr), MSG_WAITALL) != sizeof(tmr))
@@ -362,18 +365,20 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req,
      * response (will require file info first) */
     case MODIFY_FILE:
     {
-        if(tmr.type != FILE_UPDATE     ||
-           tmr.user_id != req->user_id ||
-           tmr.idx != req->file_idx    ||
+        if(tmr.type != FILE_UPDATE             ||
+           tmr.user_id != req->user_id         ||
+           tmr.idx != req->file_idx            ||
+           tmr.counter != old_verinfo->counter ||
            !hash_equals(tmr.val, val))
             return req_null;
         break;
     }
     case MODIFY_ACL:
     {
-        if(tmr.type != ACL_UPDATE      ||
-           tmr.user_id != req->user_id ||
-           tmr.idx != req->file_idx    ||
+        if(tmr.type != ACL_UPDATE              ||
+           tmr.user_id != req->user_id         ||
+           tmr.idx != req->file_idx            ||
+           tmr.counter != old_verinfo->counter ||
            !hash_equals(tmr.val, val))
             return req_null;
         break;
@@ -382,7 +387,7 @@ static struct tm_request verify_and_sign(int fd, const struct user_request *req,
         return req_null;
     }
 
-    //printf("Signing request\n");
+    printf("Signing request\n");
     hash_t hmac = hmac_sha256(&tmr, sizeof(tmr), userkey, strlen(userkey));
     write(fd, &hmac, sizeof(hmac));
 
@@ -397,6 +402,11 @@ static bool verify_sp_ack(int fd, const struct tm_request *tmr)
 
     return verify_ack(tmr, userkey, strlen(userkey), hmac);
 }
+
+/* This depends on exec_request */
+struct version_info request_verinfo(int fd, uint64_t user_id,
+                                    const char *user_key, size_t keylen,
+                                    uint64_t file_idx, uint64_t version);
 
 /* In case of modifcation or file creation, returns true on successful
  * completion of request, as acknowledged by module. In case of info
@@ -416,9 +426,18 @@ bool exec_request(int fd, const struct user_request *req,
                   hash_t *secret_out,                        /* RETRIEVE_FILE only */
                   void **file_contents_out,                  /* RETRIEVE_FILE only */
                   size_t *file_len,                          /* RETRIEVE_FILE only */
-                  struct server_profile *profile_out)        /* profile=true only */
+                  struct server_profile *profile_out,        /* profile=true only */
+                  const struct version_info *orig_verinfo)   /* MODIFY_FILE and MODIFY_ACL only */
 {
+    if(req->type == MODIFY_FILE || req->type == MODIFY_ACL)
+    {
+        printf("Modify request; original version info:\n");
+        dump_versioninfo(orig_verinfo);
+    }
+
+    /* Send actual request */
     write(fd, req, sizeof(*req));
+
     /* write additional data */
     switch(req->type)
     {
@@ -464,7 +483,7 @@ bool exec_request(int fd, const struct user_request *req,
         else if(req->type == MODIFY_ACL)
             val = iomt_getroot(new_acl);
 
-        struct tm_request tmr = verify_and_sign(fd, req, val);
+        struct tm_request tmr = verify_and_sign(fd, req, val, orig_verinfo);
         if(tmreq_out)
             *tmreq_out = tmr;
 
@@ -565,6 +584,7 @@ struct version_info request_verinfo(int fd, uint64_t user_id,
                            NULL,
                            NULL,
                            NULL,
+                           NULL,
                            NULL);
     if(rc)
         return verinfo;
@@ -611,6 +631,26 @@ bool server_request(const char *sockpath,
     size_t file_len = 0, bc_len = 0, cf_len = 0;
     hash_t secret = hash_null;
 
+    /* Get current version info (needed in multiple places) */
+    struct version_info orig_verinfo = verinfo_null;
+
+    if(req.type == MODIFY_FILE || req.type == MODIFY_ACL)
+    {
+        /* Get version */
+        int fd = connect_to_service(sockpath);
+        orig_verinfo = request_verinfo(fd, user_id,
+                                       user_key, strlen(user_key),
+                                       req.modify_file.file_idx,
+                                       0);
+        close(fd);
+
+        if(orig_verinfo.idx == 0)
+        {
+            printf("Could not get version info.\n");
+            return false;
+        }
+    }
+
     /* Fill in rest of request structure */
     req.user_id = user_id;
 
@@ -627,21 +667,6 @@ bool server_request(const char *sockpath,
             /* Encrypt file and secret */
             if(file_key)
             {
-                /* Get version */
-                int fd = connect_to_service(sockpath);
-                struct version_info verinfo = request_verinfo(fd, user_id,
-                                                              user_key, strlen(user_key),
-                                                              req.modify_file.file_idx,
-                                                              0);
-                close(fd);
-
-                /* failure */
-                if(verinfo.idx == 0)
-                {
-                    printf("Could not get version info.\n");
-                    return false;
-                }
-
                 /* We use a block cipher in CTR mode and can thus
                  * avoid having to use an IV (as long as we never
                  * re-use keys) */
@@ -655,7 +680,7 @@ bool server_request(const char *sockpath,
                 req.modify_file.kf = calc_kf(secret, req.modify_file.file_idx);
                 req.modify_file.encrypted_secret = crypt_secret(secret,
                                                                 req.modify_file.file_idx,
-                                                                verinfo.max_version + 1,
+                                                                orig_verinfo.max_version + 1,
                                                                 user_key, user_id);
             }
         }
@@ -691,7 +716,8 @@ bool server_request(const char *sockpath,
                                 req.type == RETRIEVE_FILE ? &secret : NULL,
                                 req.type == RETRIEVE_FILE ? &file_contents : NULL,
                                 req.type == RETRIEVE_FILE ? &file_len : NULL,
-                                req.profile ? &profile : NULL);
+                                req.profile ? &profile : NULL,
+                                &orig_verinfo);
 
     close(fd);
 
@@ -739,7 +765,6 @@ bool server_request(const char *sockpath,
 
         if(compose_path && composefile)
             write_file(compose_path, composefile, cf_len);
-        /* What about build code? We only have the IOMT, not the actual contents. */
 
         /* Verify contents */
         int fd = connect_to_service(sockpath);

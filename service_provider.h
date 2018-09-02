@@ -19,7 +19,8 @@ struct service_provider;
  *
  * 3. Service sends filled tm_request to client for signature.
  *
- * 4. Client verifies that the tm_request is appropriate.
+ * 4. Client verifies that the tm_request is appropriate (using
+ * information from a separate RETRIEVE_INFO request)
  *
  * 5. Client sends HMAC(tm_request, user key) to service.
  *
