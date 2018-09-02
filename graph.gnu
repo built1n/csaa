@@ -6,7 +6,7 @@ set yrange [0:2000]
 set style line 1 lc rgb '#0060ad' lt 1 lw 2 pt -1 ps 0
 #set style line 3 pt -1 ps 0
 
-set terminal eps size 6in,10in font "LiberationSerif"
+set terminal eps size 6.5in,2.5in font "LiberationSerif"
 
 create_times = "`wc -l labels_0_create.txt`"
 modify_times = "`wc -l labels_1_modify.txt`"
@@ -29,7 +29,7 @@ dummy_retrieve_labels = "`cat dummy_labels_2_retrieve.txt | tr "\n" " "`"
 set output "graph_create.eps"
 #set terminal qt 0
 
-set multiplot layout 2, 1 title "Create Performance"
+set multiplot layout 1, 2 title "Create Performance"
 
 set title "Authenticated"
 
@@ -46,7 +46,7 @@ unset multiplot
 set output "graph_modify.eps"
 #set terminal qt 1
 
-set multiplot layout 2, 1 title "Modify Performance"
+set multiplot layout 1, 2 title "Modify Performance"
 
 set title "Authenticated"
 
@@ -63,7 +63,7 @@ unset multiplot
 set output "graph_retrieve.eps"
 #set terminal qt 2
 
-set multiplot layout 2, 1 title "Retrieve Performance"
+set multiplot layout 1, 2 title "Retrieve Performance"
 
 set title "Authenticated"
 
@@ -75,7 +75,7 @@ plot for[i=3 * dummy_retrieve_times - 1:2:-3] '< paste results/final_data_2_*.tx
 
 unset multiplot
 
-
+set terminal eps size 3in,2.5in font "LiberationSerif"
 
 set output "graph_modifyenc.eps"
 #set terminal qt 3
